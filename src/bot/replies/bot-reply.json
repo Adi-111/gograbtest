@@ -1,0 +1,382 @@
+{
+    "whatsappReplies": [
+      {
+        "nodeId": "main_question-fXmet",
+        "flowNodeType": "Question",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>Got it; let's sort this out. Please share:</p>\n<p>📸 Screenshot of your UPI transaction</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_list-gNohg",
+        "flowNodeType": "InteractiveList",
+        "header": "",
+        "body": "<p>Hi {{name}},<br>\nWelcome to Go-Grab! Our goal is to uplift your mood and fulfill your cravings.<br>\nHow can we further enhance your experience today? Please choose one of the options from the menu below.</p>",
+        "footer": "",
+        "buttonText": "Menu Here",
+        "sections": [
+          {
+            "id": "KmuhoJz",
+            "title": "Please select",
+            "rows": [
+              {
+                "id": "SSUaLZm",
+                "title": "Order Fail/Refund Issues",
+                "nodeResultId": "main_buttons-bCVmo"
+              },
+              {
+                "id": "DjjhChn",
+                "title": "Machine Issues",
+                "nodeResultId": "main_buttons-hSJwk"
+              },
+              {
+                "id": "xxQefYq",
+                "title": "Product Quality Issues",
+                "nodeResultId": "main_question-sZPbm"
+              },
+              {
+                "id": "kNZjsqt",
+                "title": "RFID Card Recharge",
+                "nodeResultId": "main_message-DqzXV"
+              },
+              {
+                "id": "yPQwHQv",
+                "title": "Suggestions or Feedback",
+                "nodeResultId": "main_question-nyJZr"
+              },
+              {
+                "id": "zJUcqSc",
+                "title": "Others",
+                "nodeResultId": "main_question-FyKfq"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-bCVmo",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>Sorry for any trouble! If there was a vending issue, we typically issue automatic refunds within 15 minutes. Please check your bank account, as refunds may not appear instantly in apps like PhonePe or Google Pay.</p>\n<p><br></p>\n<p>Have you received your refund? </p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "TSjdbKm",
+            "buttonText": "Yes",
+            "nodeResultId": "main_buttons-nfdhg"
+          },
+          {
+            "id": "Rrsdscb",
+            "buttonText": "No",
+            "nodeResultId": "main_question-fXmet"
+          }
+        ],
+        "userInputVariable": "flow1",
+        "defaultNodeResultId": "main_condition-xtEBv"
+      },
+      {
+        "nodeId": "main_question-sZPbm",
+        "flowNodeType": "Question",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>Please tell us the issue. We'll make sure that doesn't happen again!!</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_question-nyJZr",
+        "flowNodeType": "Question",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>Your feedback is crucial to us. Please share your thoughts or suggestions.</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_question-FyKfq",
+        "flowNodeType": "Question",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>We're here to help. Please describe your issue or question, and we'll get back to you shortly.</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_message-eYTEm",
+        "flowNodeType": "Message",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>We're all ears! Thanks for taking the time to share your thoughts. Your feedback is invaluable, and we'll incorporate your suggestions soon.</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_message-ILtoz",
+        "flowNodeType": "Message",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>Have a snack-tastic day, and remember to snag some awesome treats from Go-Grab. Happy munching!</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-nfdhg",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>We're really glad to know that!!</p>\n<p>Thanks for staying connected to Go-Grab. Got any other questions?</p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "lAlDigH",
+            "buttonText": "Yes",
+            "nodeResultId": "main_list-POPZV"
+          },
+          {
+            "id": "EvANDEM",
+            "buttonText": "No",
+            "nodeResultId": "main_message-ILtoz"
+          }
+        ],
+        "userInputVariable": "flow1",
+        "defaultNodeResultId": "main_condition-xtEBv"
+      },
+      {
+        "nodeId": "main_message-DqzXV",
+        "flowNodeType": "Message",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<h3>Steps to Recharge Your RFID Card</h3>\n<ol>\n  <li>1. Scan the below PayTM QR code to complete the payment. (Minimum 100 rs.)<br>\n<br>\n\n2. Once payment is done, revert with the following details on this chat:<br>\na. Student Name<br>\nb. RFID Card No. (You will find it on the bottom-right corner of front side of the card, e.g., GG-IES-XXXXX)<br>\nc. Recharge Payment Screenshot<br>\nd. RFID Card Frontside Photo containing ID<br>\n</li>\n  <li>3. Once we receive all these four (4) details, the recharge on your card will be done. Kindly ensure the details are correct, as once recharged, they will not be refunded.<br>\n</li>\n  <li>4. It may take up to 6–8 hours for the balance to reflect in your wallet.<br>\n</li>\n</ol>\n<p>For any assistance or queries, you can message us anytime. We are all ears.</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_list-POPZV",
+        "flowNodeType": "InteractiveList",
+        "header": "",
+        "body": "<p>Okay, we are all ears. Please select any one from the given options below.</p>",
+        "footer": "",
+        "buttonText": "Menu Here",
+        "sections": [
+          {
+            "id": "fUeJGrg",
+            "title": "Please select one",
+            "rows": [
+              {
+                "id": "NFIDoEa",
+                "title": "Order Fail/Refund Issues",
+                "nodeResultId": "main_buttons-bCVmo"
+              },
+              {
+                "id": "mWRLdhp",
+                "title": "Machine Issues",
+                "nodeResultId": "main_buttons-hSJwk"
+              },
+              {
+                "id": "kkYpxlP",
+                "title": "Product Quality Issues",
+                "nodeResultId": "main_question-sZPbm"
+              },
+              {
+                "id": "VxqZoRi",
+                "title": "RFID Card Recharge",
+                "nodeResultId": "main_message-DqzXV"
+              },
+              {
+                "id": "VCCHuBj",
+                "title": "Suggestion or Feedback",
+                "nodeResultId": "main_question-nyJZr"
+              },
+              {
+                "id": "PwoHVMk",
+                "title": "Others",
+                "nodeResultId": "main_question-FyKfq"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-hSJwk",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>Please choose from the options below the issue you're experiencing with the machine?</p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "JpICnvx",
+            "buttonText": "Machine is offline",
+            "nodeResultId": "main_question-uEzow"
+          },
+          {
+            "id": "qupfIgx",
+            "buttonText": "Any other issues",
+            "nodeResultId": "main_question-BPjjT"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-HaxqQ",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>Thank you for providing the details! We're on it and will get back to you with an update on your refund status by the end of the day.<br>\n<br>\nGot any other query?</p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "csGVvuA",
+            "buttonText": "Yes",
+            "nodeResultId": "main_list-POPZV"
+          },
+          {
+            "id": "yfRMfpN",
+            "buttonText": "No",
+            "nodeResultId": "main_message-ILtoz"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_question-lPOjI",
+        "flowNodeType": "Question",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>Can you let us know what happened? Just the key details, please.</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-UKULI",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>Thank you for letting us know! We're looking into your product query and will work swiftly to address your concerns. Expect an update from us soon!</p>\n<p>Got any other query?</p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "nofDMNB",
+            "buttonText": "Yes",
+            "nodeResultId": "main_list-POPZV"
+          },
+          {
+            "id": "cnmGnrw",
+            "buttonText": "No",
+            "nodeResultId": "main_message-ILtoz"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-HxEFX",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>Thank you for understanding. Machine will start working as soon as network restores. Stay connected to Go-Grab.</p>\n<p><br></p>\n<p>Got any other query?</p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "ayZsKPG",
+            "buttonText": "Yes",
+            "nodeResultId": "main_list-POPZV"
+          },
+          {
+            "id": "pybNkHv",
+            "buttonText": "No",
+            "nodeResultId": "main_message-ILtoz"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-JYKle",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>Got it, thank you! We're looking into your query and will provide a response shortly. Your patience is appreciated!</p>\n<p><br></p>\n<p>Got any other query?</p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "RWmMoVN",
+            "buttonText": "Yes",
+            "nodeResultId": "main_list-POPZV"
+          },
+          {
+            "id": "KvchZFa",
+            "buttonText": "No",
+            "nodeResultId": "main_message-ILtoz"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_question-BPjjT",
+        "flowNodeType": "Question",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>Please tell us what issues you are facing while using the machine. We are all ears.</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-MYBpQ",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>Thank you for letting us know. Our representative will reach their shortly and resolve the issue. Thank you for understanding, stay connected to Go-Grab.</p>\n<p><br>\n<br>\nGot any other query?</p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "uGGmZYg",
+            "buttonText": "Yes",
+            "nodeResultId": "main_list-POPZV"
+          },
+          {
+            "id": "yepygYB",
+            "buttonText": "No",
+            "nodeResultId": "main_message-ILtoz"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_question-uEzow",
+        "flowNodeType": "Question",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>Really sorry for this experience. Can you please tell us the machine's location?</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_question-QMjHp",
+        "flowNodeType": "Question",
+        "replies": [
+          {
+            "replyType": "Text",
+            "data": "<p>Really sorry for this experience. One last step, can you please tell machine's location?</p>"
+          }
+        ]
+      },
+      {
+        "nodeId": "main_buttons-uXtwT",
+        "flowNodeType": "InteractiveButtons",
+        "header": "",
+        "body": "<p>Thank you for letting us know, we are sending our team there and getting the machine online.</p>\n<p><br>\n<br>\nGot any other query?</p>",
+        "footer": "",
+        "items": [
+          {
+            "id": "tpvTnTT",
+            "buttonText": "Yes",
+            "nodeResultId": "main_list-POPZV"
+          },
+          {
+            "id": "JMYMTiw",
+            "buttonText": "No",
+            "nodeResultId": "main_message-ILtoz"
+          }
+        ]
+      }
+    ]
+  }
+  

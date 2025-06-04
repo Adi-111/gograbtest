@@ -1,0 +1,333 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Bot {
+  id        Int       @id @default(autoincrement())
+  name      String    @default("ChatBot")
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  Case      Case[]
+}
+
+enum ReplyType {
+  InteractiveList
+  InteractiveButtons
+  Question
+  Message
+  Media
+}
+
+model QuickReplies {
+  id           Int       @id @unique @default(autoincrement())
+  flowNodeType ReplyType
+  header       Json?
+  body         Json?
+  footer       Json?
+  action       Json?
+  replies      Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model BotReplies {
+  nodeId       String    @unique // Unique identifier for the reply node
+  flowNodeType ReplyType // Type of node (e.g., InteractiveList, InteractiveButtons, Question, Message)
+  header       Json? // Header content (if applicable)
+  body         Json? // Body content (if applicable)
+  footer       Json? // Footer content (if applicable)
+  action       Json? // Action content (e.g., buttons, sections)
+  replies      Json? // Replies for questions or messages
+  botId        String? // Link to the Bot model
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model User {
+  id             Int              @id @default(autoincrement())
+  firstName      String
+  lastName       String
+  email          String           @unique
+  password       String
+  sessions       Session[]
+  messages       Message[]
+  cases          Case[]
+  tags           Tag[]            @relation("UserTags")
+  notes          Note[]
+  statusEvent    StatusEvent[]
+  failedMsgEvent FailedMsgEvent[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model Session {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  token     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model WhatsAppCustomer {
+  id              Int       @id @default(autoincrement())
+  name            String
+  phoneNo         String    @unique
+  profileImageUrl String
+  cases           Case[]
+  createdAt       DateTime  @default(now())
+  message         Message[]
+}
+
+model Case {
+  id             Int              @id @default(autoincrement())
+  status         Status           @default(INITIATED)
+  assignedTo     CaseHandler      @default(BOT)
+  unread         Int?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  messages       Message[]
+  customer       WhatsAppCustomer @relation(fields: [customerId], references: [id])
+  customerId     Int
+  user           User?            @relation(fields: [userId], references: [id])
+  userId         Int?
+  bot            Bot?             @relation(fields: [botId], references: [id])
+  botId          Int?
+  timer          DateTime?
+  tags           Tag[]            @relation("CaseTags")
+  lastBotNodeId  String?
+  notes          Note[]
+  meta           Json?
+  statusEvent    StatusEvent[]
+  failedMsgEvent FailedMsgEvent[]
+  isNewCase      Boolean          @default(true)
+
+  @@index([status])
+  @@index([customerId])
+}
+
+model StatusEvent {
+  id             Int      @id @default(autoincrement())
+  caseId         Int
+  case           Case     @relation(fields: [caseId], references: [id])
+  userId         Int
+  user           User     @relation(fields: [userId], references: [id])
+  previousStatus Status
+  newStatus      Status
+  timestamp      DateTime @default(now())
+
+  @@index([caseId])
+}
+
+model FailedMsgEvent {
+  id        Int      @id @default(autoincrement())
+  caseId    Int
+  case      Case     @relation(fields: [caseId], references: [id])
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  text      String
+  timestamp DateTime @default(now())
+  tries     Int
+  messageId Int
+
+  @@index([caseId])
+}
+
+model Note {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  caseId    Int
+  case      Case     @relation(fields: [caseId], references: [id])
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Tag {
+  id        Int      @id @default(autoincrement())
+  text      String   @unique
+  userId    Int
+  user      User     @relation("UserTags", fields: [userId], references: [id])
+  cases     Case[]   @relation("CaseTags")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Message {
+  id           Int                  @id @default(autoincrement())
+  type         MessageType
+  replyType    ReplyType?
+  senderType   SenderType
+  text         String?
+  recipient    String?
+  timestamp    DateTime             @default(now())
+  waMessageId  String?
+  context      Json?
+  media        Media?
+  location     Location?
+  contacts     Contact[]
+  interactive  Interactive?
+  systemStatus SystemMessageStatus?
+  error        Json?
+
+  // Relationships
+  user               User?             @relation(fields: [userId], references: [id])
+  userId             Int?
+  bot                Bot?              @relation(fields: [botId], references: [id])
+  botId              Int?
+  parentMessage      Message?          @relation("MessageReplies", fields: [parentMessageId], references: [id])
+  parentMessageId    Int?
+  replies            Message[]         @relation("MessageReplies")
+  case               Case?             @relation(fields: [caseId], references: [id])
+  caseId             Int?
+  WhatsAppCustomer   WhatsAppCustomer? @relation(fields: [whatsAppCustomerId], references: [id])
+  whatsAppCustomerId Int?
+
+  @@index([senderType])
+  @@index([recipient])
+  @@index([timestamp])
+  @@index([type])
+}
+
+model Media {
+  id        Int      @id @default(autoincrement())
+  message   Message? @relation(fields: [messageId], references: [id])
+  messageId Int?     @unique
+  waMediaId String?
+  url       String
+  mimeType  String
+  caption   String?
+  fileName  String?
+  size      Int?
+  duration  Int? // For audio/video
+  height    Int? // For images/video
+  width     Int? // For images/video
+}
+
+model Location {
+  id        Int      @id @default(autoincrement())
+  message   Message? @relation(fields: [messageId], references: [id])
+  messageId Int?     @unique
+  latitude  Float
+  longitude Float
+  name      String?
+  address   String?
+  url       String? // Map link
+  accuracy  Float? // Location accuracy in meters
+}
+
+model CustomerOrderDetails {
+  id Int @unique @id
+  customerId     Int
+  coils     Int[]
+  productIds String[]
+  dispenseStatuses String[]
+  orderTime DateTime
+  created_at DateTime  @default(now())
+}
+
+model Product {
+  product_id            String   @unique @id
+  product_name          String
+  description           String? 
+  image                 String
+  category              String
+  product_price         Int
+  brand_name            String
+  created_at            DateTime @default(now())
+  hsn_code              String? 
+  bar_code              String?
+  is_active             Boolean  @default(true)
+  moq                   Int
+  zoho_item_id          String
+  purchase_rate         Float
+  inter_state_tax_rate  Float
+  intra_state_tax_rate  Float
+  product_type          String? 
+  markdown_percentage   Float
+}
+
+model Contact {
+  id        Int       @id @default(autoincrement())
+  message   Message?  @relation(fields: [messageId], references: [id])
+  messageId Int?
+  name      Json? // Structured name {formatted_name, first_name, last_name...}
+  phones    Json // Array of phone numbers with type
+  emails    Json? // Array of emails
+  addresses Json? // Array of addresses
+  org       Json? // Organization details
+  birthday  DateTime?
+  urls      Json? // Array of URLs
+}
+
+model Interactive {
+  id           Int      @id @default(autoincrement())
+  message      Message? @relation(fields: [messageId], references: [id])
+  messageId    Int?     @unique
+  type         String // button, list, product, etc.
+  header       Json? // Interactive header content
+  body         Json? // Interactive body content
+  footer       Json? // Interactive footer content
+  action       Json // Interactive action (buttons, sections)
+  parameters   Json? // Additional parameters
+  userResponse Json? // Store user's response
+}
+
+// Remaining models (Media, Location, Contact, Interactive) stay similar but:
+// - Use String IDs
+// - Add createdAt/updatedAt
+// - Adjust relations as needed
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  STICKER
+  CONTACT
+  LOCATION
+  INTERACTIVE
+  SYSTEM
+  LIST_REPLY
+  BUTTON_REPLY
+}
+
+enum SenderType {
+  USER
+  CUSTOMER
+  BOT
+}
+
+enum SystemMessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  UPDATED
+  DISABLED
+}
+
+enum Status {
+  INITIATED
+  BOT_HANDLING
+  ASSIGNED
+  PROCESSING
+  SOLVED
+  UNSOLVED
+}
+
+enum CaseHandler {
+  USER
+  BOT
+}
