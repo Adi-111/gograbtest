@@ -73,6 +73,13 @@ export class CustomerController {
     return await this.ggAppBackend.getCustomerData();
   }
 
+  @Post('customer-data-v')
+  async customerDataVerdict(@Body() payload: { id: number, verdict: string }) {
+    const { id, verdict } = payload;
+    this.logger.log(id, verdict);
+    return await this.ggAppBackend.updateCustomerDataVerdict(id, verdict);
+  }
+
 
 
   // @Get('getAllCustomer')

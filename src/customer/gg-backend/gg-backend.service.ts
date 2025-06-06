@@ -224,6 +224,18 @@ export class GGBackendService {
         return await this.prisma.customerOrderDetails.findMany();
     }
 
+    async updateCustomerDataVerdict(id: number, verdict: string) {
+        const customerData = await this.prisma.customerOrderDetails.update({
+            where: {
+                id
+            },
+            data: {
+                verdict
+            }
+        });
+        return customerData;
+    }
+
 
 
 
