@@ -212,6 +212,7 @@ export class GGBackendService {
                 productIds: product_ids,
                 dispenseStatuses,
                 orderTime: vendItems[vendItems.length - 1].vend_time,
+                coils
             }
         });
 

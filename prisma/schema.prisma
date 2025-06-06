@@ -328,7 +328,7 @@ enum CaseHandler {
 model CustomerOrderDetails {
   id        Int       @id @default(autoincrement())
   customerId     Int
-  coils     Int[]
+  coils     String[]
   productIds String[]
   dispenseStatuses String[]
   verdict String?
