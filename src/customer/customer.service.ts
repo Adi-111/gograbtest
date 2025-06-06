@@ -8,6 +8,7 @@ import { CloudService } from 'src/cloud/cloud.service';
 import { GGBackendService } from './gg-backend/gg-backend.service';
 import { TransactionInfoDto } from './gg-backend/dto/transaction-info.dto';
 import { FailedMessageDto } from 'src/chat/dto/failed-message.dto';
+import { MergedProductDetail } from './types';
 
 
 
@@ -486,6 +487,8 @@ export class CustomerService {
     }
 
     async handleRefundScreenshot(url: string, phoneNo: string, caseId: number) {
+
+        let vendDetails: MergedProductDetail;
         try {
             if (!caseId || !phoneNo) {
                 this.logger.error('Missing caseId or phoneNo.');
@@ -506,6 +509,12 @@ export class CustomerService {
 
             const txnInfo: TransactionInfoDto = await this.gg_backend_service.bankTxn(utrId);
 
+
+
+            if (txnInfo && txnInfo.order_id) {
+                vendDetails = await this.gg_backend_service.getVendDetails(txnInfo.order_id);
+                await this.gg_backend_service.createCustomerDetails(vendDetails, caseId)
+            }
 
             if (txnInfo?.errorCode && txnInfo?.errorCode === 10002) {
                 await this.botService.botSendByNodeId('screenshot-canceled', phoneNo, caseId);
@@ -536,13 +545,15 @@ export class CustomerService {
                 if (caseMeta?.refundScreenshotActive) {
                     await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
                     if (txnInfo && txnInfo.order_id) {
-                        const vendDetails = await this.gg_backend_service.getVendDetails(txnInfo.order_id)
-                        await this.botService.sendProductDetails(phoneNo, vendDetails)
+                        this.logger.log(vendDetails);
+                        await this.gg_backend_service.createCustomerDetails(vendDetails, caseId)
+                        await this.botService.sendProductDetails(phoneNo, vendDetails);
                     }
                     await this.prisma.case.update({ where: { id: caseId }, data: { lastBotNodeId: "stop", meta: { refundScreenshotActive: false, refundScreenshotTries: 0 } } })
                 }
                 return;
             }
+
 
             // Refund successful
             await this.botService.sendRefundMessage(phoneNo, caseId, resInfo.status.refundDetailInfoList[0]);

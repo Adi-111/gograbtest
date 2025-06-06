@@ -7,6 +7,7 @@ import { VendItemDto } from "./dto/vendItemDto";
 import { ProductDto } from "./dto/products.dto";
 import { PrismaService } from "src/prisma/prisma.service";
 import { MergedProductDetail, ProductDetailProp } from "../types";
+import { CustomerOrderDetails } from "@prisma/client";
 
 
 
@@ -112,7 +113,6 @@ export class GGBackendService {
                     Authorization: `Bearer ${this.bearerToken}`
                 }
             });
-
             const vendInfo: VendInfoDto = res.data;
             const vendIds: string[] = vendInfo.order_details;
             const vendItems: VendItemDto[] = await Promise.all(
@@ -191,6 +191,36 @@ export class GGBackendService {
         } catch (error) {
             this.logger.warn('error fetching products from go-grab')
         }
+    }
+
+
+    async createCustomerDetails(vendInfo: MergedProductDetail, customerId: number) {
+        const { vendItems, productItems } = vendInfo;
+        const coils: string[] = await Promise.all(
+            vendItems.map(el => el.coil_id)
+        )
+        const product_ids: string[] = await Promise.all(
+            productItems.map(el => el.product_id)
+        )
+        const dispenseStatuses = await Promise.all(
+            vendItems.map(el => el.vend_status)
+        )
+        this.logger.log(coils, product_ids);
+        const customerData = await this.prisma.customerOrderDetails.create({
+            data: {
+                customerId,
+                productIds: product_ids,
+                dispenseStatuses,
+                orderTime: vendItems[vendItems.length - 1].vend_time,
+            }
+        });
+
+        this.logger.log(customerData);
+
+    }
+
+    async getCustomerData() {
+        return await this.prisma.customerOrderDetails.findMany();
     }
 
 

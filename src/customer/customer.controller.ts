@@ -68,6 +68,10 @@ export class CustomerController {
   async getProducts() {
     return await this.ggAppBackend.bankTxn('');
   }
+  @Get('customer-data-&&$$')
+  async customerData() {
+    return await this.ggAppBackend.getCustomerData();
+  }
 
 
 

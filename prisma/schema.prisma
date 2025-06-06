@@ -226,15 +226,8 @@ model Location {
   accuracy  Float? // Location accuracy in meters
 }
 
-model CustomerOrderDetails {
-  id Int @unique @id
-  customerId     Int
-  coils     Int[]
-  productIds String[]
-  dispenseStatuses String[]
-  orderTime DateTime
-  created_at DateTime  @default(now())
-}
+
+
 
 model Product {
   product_id            String   @unique @id
@@ -330,4 +323,15 @@ enum Status {
 enum CaseHandler {
   USER
   BOT
+}
+
+model CustomerOrderDetails {
+  id        Int       @id @default(autoincrement())
+  customerId     Int
+  coils     Int[]
+  productIds String[]
+  dispenseStatuses String[]
+  verdict String?
+  orderTime DateTime
+  created_at DateTime  @default(now())
 }
