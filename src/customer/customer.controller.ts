@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Res, Logger, Post, Query, Param } from '@nestjs/common';
+import { Body, Controller, Get, Res, Logger, Post, Query, Param, Next } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
 
@@ -6,6 +6,7 @@ import { ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
 import { CustomerService } from './customer.service';
 import { ChatEntity } from 'src/chat/entity/chat.entity';
 import { GGBackendService } from './gg-backend/gg-backend.service';
+import { error } from 'console';
 
 @Controller('read/webhook')
 @ApiTags('customer')
@@ -78,6 +79,23 @@ export class CustomerController {
     const { id, verdict } = payload;
     this.logger.log(id, verdict);
     return await this.ggAppBackend.updateCustomerDataVerdict(id, verdict);
+  }
+
+
+  @Post('customer-data-post')
+  async getCustomerDataByPost(@Body() payload: {
+    orderTime: string,
+    machine_id: string
+  }) {
+    if (!payload) {
+      return null;
+    }
+    const {
+      orderTime, machine_id
+    } = payload;
+
+    this.logger.log(`received filtered request to fetch customer-data:${orderTime}, ${machine_id}`);
+    return await this.ggAppBackend.getCustomerDataByPost(orderTime, machine_id);
   }
 
 

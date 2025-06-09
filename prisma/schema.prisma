@@ -331,6 +331,7 @@ model CustomerOrderDetails {
   coils     String[]
   productIds String[]
   dispenseStatuses String[]
+  machine_id String?
   verdict String?
   orderTime DateTime
   created_at DateTime  @default(now())

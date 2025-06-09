@@ -9,6 +9,7 @@ export type ProductDetailProp = {
 }
 
 export type MergedProductDetail = {
-    vendItems: VendItemDto[];
-    productItems: ProductDetailProp[]
+    vendItems: VendItemDto[],
+    productItems: ProductDetailProp[],
+    machine_id: string
 }

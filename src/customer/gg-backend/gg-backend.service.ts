@@ -121,10 +121,11 @@ export class GGBackendService {
             const productItems: ProductDetailProp[] = await Promise.all(
                 vendItems.map(el => this.ProductById(el.product_id))
             );
-            return { vendItems, productItems };
+            const machine_id = vendInfo.machine_id;
+            return { vendItems, productItems, machine_id };
         } catch (error) {
             this.logger.warn(`Error while fetching vending information: ${error}`);
-            return { vendItems: [], productItems: [] };
+            return { vendItems: [], productItems: [], machine_id: '' };
         }
     }
 
@@ -205,6 +206,7 @@ export class GGBackendService {
         const dispenseStatuses = await Promise.all(
             vendItems.map(el => el.vend_status)
         )
+        const machine_id = vendInfo.vendItems
         this.logger.log(coils, product_ids);
         const customerData = await this.prisma.customerOrderDetails.create({
             data: {
@@ -222,6 +224,17 @@ export class GGBackendService {
 
     async getCustomerData() {
         return await this.prisma.customerOrderDetails.findMany();
+    }
+
+
+    async getCustomerDataByPost(order_time: string, machine_id: string) {
+        const data = await this.prisma.customerOrderDetails.findMany({
+            where: {
+                orderTime: order_time,
+                machine_id
+            }
+        })
+        return data;
     }
 
     async updateCustomerDataVerdict(id: number, verdict: string) {
