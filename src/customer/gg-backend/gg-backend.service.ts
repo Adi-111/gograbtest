@@ -206,7 +206,7 @@ export class GGBackendService {
         const dispenseStatuses = await Promise.all(
             vendItems.map(el => el.vend_status)
         )
-        const machine_id = vendInfo.vendItems
+        const machine_id = vendInfo.machine_id
         this.logger.log(coils, product_ids);
         const customerData = await this.prisma.customerOrderDetails.create({
             data: {
@@ -214,7 +214,8 @@ export class GGBackendService {
                 productIds: product_ids,
                 dispenseStatuses,
                 orderTime: vendItems[vendItems.length - 1].vend_time,
-                coils
+                coils,
+                machine_id
             }
         });
 
