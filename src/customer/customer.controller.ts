@@ -84,18 +84,19 @@ export class CustomerController {
 
   @Post('customer-data-post')
   async getCustomerDataByPost(@Body() payload: {
-    orderTime: string,
+    startTime: string,
+    endTime: string
     machine_id: string
   }) {
     if (!payload) {
       return null;
     }
     const {
-      orderTime, machine_id
+      machine_id, startTime, endTime
     } = payload;
 
-    this.logger.log(`received filtered request to fetch customer-data:${orderTime}, ${machine_id}`);
-    return await this.ggAppBackend.getCustomerDataByPost(orderTime, machine_id);
+    this.logger.log(`received filtered request to fetch customer-data between :${startTime} & ${endTime}, ${machine_id}`);
+    return await this.ggAppBackend.getCustomerDataByPost(startTime, endTime, machine_id);
   }
 
 

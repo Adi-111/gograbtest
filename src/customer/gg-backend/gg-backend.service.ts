@@ -228,14 +228,18 @@ export class GGBackendService {
     }
 
 
-    async getCustomerDataByPost(order_time: string, machine_id: string) {
-        const data = await this.prisma.customerOrderDetails.findMany({
+    async getCustomerDataByPost(startTime: string, endTime: string, machine_id: string) {
+        const customerData = await this.prisma.customerOrderDetails.findMany({
             where: {
-                orderTime: order_time,
-                machine_id
+                machine_id,
+                orderTime: {
+                    gte: startTime,  // orderTime ≥ startTime
+                    lte: endTime,    // orderTime ≤ endTime
+                },
             }
-        })
-        return data;
+        });
+        this.logger.log(`retrieved Cus Data = ${customerData}`)
+        return customerData
     }
 
     async updateCustomerDataVerdict(id: number, verdict: string) {
