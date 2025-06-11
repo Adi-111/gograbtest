@@ -339,7 +339,7 @@ export class BotService {
         // Header
         let msg =
             `We’ve checked our machine logs for your order. Here’s the status:\n` +
-            ` Time – Product – Status\n`
+            `**Time** – **Product** – **Status**\n`
 
         // One line per vend event
         msg += vendItems
@@ -388,8 +388,5 @@ export class BotService {
         }
         await this.chatService.createMessage(message);
         await this.customerService.sendTextMessage(phoneNumber, msg);
-        await this.botSendByNodeId('las', phoneNumber, caseId);
-
-
     }
 }
