@@ -329,10 +329,67 @@ export class BotService {
         console.log("All nodes processed.");
     }
 
-    async sendProductDetails(phoneNo: string, productDetails: MergedProductDetail) {
-        await this.customerService.sendTextMessage(phoneNo, JSON.stringify(productDetails));
+    async sendProductDetails(
+        caseId: number,
+        phoneNumber: string,
+        detail: MergedProductDetail
+    ) {
+        const { vendItems, productItems } = detail
+
+        // Header
+        let msg =
+            `We’ve checked our machine logs for your order. Here’s the status:\n` +
+            ` Time – Product – Status\n`
+
+        // One line per vend event
+        msg += vendItems
+            .map((vend) => {
+                // find matching product info
+                const product = productItems.find(
+                    (p) => p.product_id === vend.product_id
+                )
+                const productName = product?.product_name ?? vend.product_id
+
+                // parse & format the timestamp
+                const ts =
+                    typeof vend.vend_time === "string"
+                        ? new Date(vend.vend_time)
+                        : vend.vend_time
+                const formattedTime = ts.toLocaleString("en-US", {
+                    day: "2-digit",
+                    month: "short",
+                    hour: "numeric",
+                    minute: "2-digit",
+                    hour12: true,
+                })
+
+                // decide icon & text
+                const success = vend.vend_status.toLowerCase() === "success"
+                const icon = success ? "✅" : "❌"
+                const statusText = success ? "Successful" : "Failed"
+
+                return ` ${formattedTime} – ${productName} – ${icon} ${statusText}`
+            })
+            .join("\n")
+
+        // Footer
+        msg +=
+            `\nSince the products are marked as successful, a refund hasn’t been processed.\n` +
+            `If you faced any issue while receiving them, just let us know and we’ll look into it.`
+
+        const message = {
+            text: msg,
+            type: MessageType.TEXT,
+            senderType: SenderType.BOT,
+            caseId,
+            systemStatus: SystemMessageStatus.SENT,
+            timestamp: new Date(),
+            recipient: phoneNumber
+        }
+        await this.chatService.createMessage(message);
+        await this.customerService.sendTextMessage(phoneNumber, msg);
+        await this.botSendByNodeId('las', phoneNumber, caseId);
+
+
     }
-
-
-
 }

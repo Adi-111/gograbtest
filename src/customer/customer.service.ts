@@ -547,7 +547,7 @@ export class CustomerService {
                     if (txnInfo && txnInfo.order_id) {
                         this.logger.log(vendDetails);
                         await this.gg_backend_service.createCustomerDetails(vendDetails, caseId)
-                        await this.botService.sendProductDetails(phoneNo, vendDetails);
+                        await this.botService.sendProductDetails(caseId, phoneNo, vendDetails);
                     }
                     await this.prisma.case.update({ where: { id: caseId }, data: { lastBotNodeId: "stop", meta: { refundScreenshotActive: false, refundScreenshotTries: 0 } } })
                 }
