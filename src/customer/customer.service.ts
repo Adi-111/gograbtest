@@ -161,7 +161,6 @@ export class CustomerService {
                     },
                 });
             }
-
             this.logger.warn(`Retry ${updatedTries}/${maxTries} for refund screenshot.`);
         }
     }
@@ -468,7 +467,7 @@ export class CustomerService {
 
                     const cleanedContent = botContent.trim().toLowerCase();
                     if (greetings.some(greet => cleanedContent.includes(greet)) && botContent !== 'hi' && botContent !== 'main_message-ILtoz' && caseRecord.status !== Status.SOLVED) {
-                        await this.botService.botSendByNodeId('hi', phoneNo, caseRecord.id);
+                        await this.botService.sendWelcomeMsg(phoneNo, caseRecord.id);
                     }
 
 
@@ -504,6 +503,11 @@ export class CustomerService {
                 if (caseMeta?.refundScreenshotActive) {
                     await this.handleRefundRetry(caseId, phoneNo, 'screenshot1');
                 }
+                return;
+            }
+            this.logger.warn(`utrId is ${utrId}`)
+            if (utrId === 'invalid') {
+
                 return;
             }
 
@@ -657,7 +661,7 @@ export class CustomerService {
             const customer = await this.prisma.whatsAppCustomer.findUnique({ where: { id: customerId } });
             this.logger.log(customer);
             if (customer && newCase) {
-                await this.botService.botSendByNodeId('hi', customer.phoneNo, newCase.id);
+                await this.botService.sendWelcomeMsg(customer.phoneNo, newCase.id);
                 await this.chatService.broadcastNewCase(newCase);
                 if (this.isCurrentTimeBetween()) {
                     await this.botService.botSendByNodeId('off-time', customer.phoneNo, newCase.id);
@@ -679,7 +683,7 @@ export class CustomerService {
 
         if (condition1 || condition2) {
             await this.chatService.triggerStatusUpdate(activeCase.id, Status.INITIATED, 5, 'BOT')
-            await this.botService.botSendByNodeId('hi', activeCase.customer.phoneNo, activeCase.id);
+            await this.botService.sendWelcomeMsg(activeCase.customer.phoneNo, activeCase.id);
         }
         if (activeCase && activeCase.lastBotNodeId === 'main_message-ILtoz') {
             await this.prisma.case.update({ where: { id: activeCase.id }, data: { status: Status.SOLVED } })
