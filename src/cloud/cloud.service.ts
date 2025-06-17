@@ -40,18 +40,17 @@ export class CloudService {
             }
 
             // Pre-clean OCR text
-            fullText = fullText
-                .replace(/\n/g, ' ')
-                .replace(/\s{2,}/g, ' ')
-                .trim();
 
-
-
-            this.logger.log(`Extracted OCR text: ${fullText}`);
 
             const toGgRe = /To:\s*(GG-[A-Za-z0-9\-]+)/i;
             const isGGPayment = fullText.match(toGgRe);
             if (isGGPayment) {
+                fullText = fullText
+                    .replace(/\n/g, ' ')
+                    .replace(/\s{2,}/g, ' ')
+                    .trim();
+
+                this.logger.log(`Extracted OCR text: ${fullText}`);
                 // Directly search for first standalone 12-digit number
                 const match = fullText.match(/\b\d{12}\b/);
 
