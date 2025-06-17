@@ -44,27 +44,27 @@ export class CloudService {
 
             const toGgRe = /To:\s*(GG-[A-Za-z0-9\-]+)/i;
             const isGGPayment = fullText.match(toGgRe);
-            if (isGGPayment) {
-                fullText = fullText
-                    .replace(/\n/g, ' ')
-                    .replace(/\s{2,}/g, ' ')
-                    .trim();
 
-                this.logger.log(`Extracted OCR text: ${fullText}`);
-                // Directly search for first standalone 12-digit number
-                const match = fullText.match(/\b\d{12}\b/);
+            fullText = fullText
+                .replace(/\n/g, ' ')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
 
-                if (match) {
-                    this.logger.log(`Found 12-digit Transaction ID: ${match[0]}`);
-                    return match[0];
-                } else {
-                    this.logger.warn('No valid 12-digit Transaction ID found.');
-                    return null;
-                }
+            this.logger.log(`Extracted OCR text: ${fullText}`);
+            // Directly search for first standalone 12-digit number
+            const match = fullText.match(/\b\d{12}\b/);
+
+            if (match) {
+                this.logger.log(`Found 12-digit Transaction ID: ${match[0]}`);
+                return match[0];
+            } else {
+                this.logger.warn('No valid 12-digit Transaction ID found.');
+                return null;
             }
-            else {
-                return 'invalid';
-            }
+
+            // else {
+            //     return 'invalid';
+            // }
 
         } catch (error) {
             this.logger.error('Error during OCR processing:', error);
