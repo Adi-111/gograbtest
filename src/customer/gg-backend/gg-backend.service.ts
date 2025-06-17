@@ -7,7 +7,8 @@ import { VendItemDto } from "./dto/vendItemDto";
 import { ProductDto } from "./dto/products.dto";
 import { PrismaService } from "src/prisma/prisma.service";
 import { MergedProductDetail, ProductDetailProp } from "../types";
-import { CustomerOrderDetails } from "@prisma/client";
+
+import { BotService } from "src/bot/bot.service";
 
 
 
@@ -22,6 +23,7 @@ export class GGBackendService {
 
     constructor(
         private readonly prisma: PrismaService,
+        private readonly bot: BotService
     ) { }
 
 
@@ -76,8 +78,10 @@ export class GGBackendService {
 
             return txnInfo;
 
-        } catch {
-            this.logger.error(`error while working with ${this.ggApi}/payments/bank_txn_id`)
+        } catch (err) {
+            this.logger.error(`error while working with ${this.ggApi}/payments/bank_txn_id error = ${err}`)
+            return null;
+
         }
 
     }

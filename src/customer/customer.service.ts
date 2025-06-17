@@ -513,6 +513,11 @@ export class CustomerService {
 
             const txnInfo: TransactionInfoDto = await this.gg_backend_service.bankTxn(utrId);
 
+            if (txnInfo === null) {
+                await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
+                return;
+            }
+
 
 
             if (txnInfo && txnInfo.order_id) {
