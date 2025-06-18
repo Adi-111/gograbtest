@@ -512,7 +512,7 @@ export class CustomerService {
                 txnInfo = await this.gg_backend_service.bankTxn(utrId);
             }
             else {
-                await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
+                await this.botService.botSendByNodeId('screenshot5', phoneNo, caseId);
                 return;
             }
 
