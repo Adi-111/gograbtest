@@ -364,7 +364,7 @@ export class BotService {
                 })
 
                 // decide icon & text
-                const success = vend.vend_status.toLowerCase() === "success"
+                const success = vend.vend_status.toLowerCase() === "dispense_successful"
                 const icon = success ? "✅" : "❌"
                 const statusText = success ? "Successful" : "Failed"
 
