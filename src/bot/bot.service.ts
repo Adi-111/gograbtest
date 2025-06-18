@@ -338,8 +338,11 @@ export class BotService {
 
         // Header
         let msg =
-            `We’ve checked our machine logs for your order. Here’s the status:\n` +
-            `**Time** – **Product** – **Status**\n`
+            `Hello!\n\nWe've checked our machine logs for your recent order. Here's a quick summary of what happened:\n\n` +
+            `*Product Delivery Status*\n` +
+            `-----------------------------------\n` +
+            `Time        | Product             | Status\n` +
+            `-----------------------------------\n`
 
         // One line per vend event
         msg += vendItems
@@ -348,7 +351,7 @@ export class BotService {
                 const product = productItems.find(
                     (p) => p.product_id === vend.product_id
                 )
-                const productName = product?.product_name ?? vend.product_id
+                const productName = (product?.product_name ?? `Product ${vend.product_id}`).padEnd(19) // Pad for alignment
 
                 // parse & format the timestamp
                 const ts =
@@ -356,26 +359,26 @@ export class BotService {
                         ? new Date(vend.vend_time)
                         : vend.vend_time
                 const formattedTime = ts.toLocaleString("en-US", {
-                    day: "2-digit",
-                    month: "short",
                     hour: "numeric",
                     minute: "2-digit",
                     hour12: true,
-                })
+                }).padEnd(10) // Pad for alignment
 
                 // decide icon & text
                 const success = vend.vend_status.toLowerCase() === "dispense_successful"
                 const icon = success ? "✅" : "❌"
                 const statusText = success ? "Successful" : "Failed"
 
-                return ` ${formattedTime} – ${productName} – ${icon} ${statusText}`
+                return `${formattedTime} | ${productName} | ${icon} ${statusText}`
             })
             .join("\n")
 
         // Footer
         msg +=
-            `\nSince the products are marked as successful, a refund hasn’t been processed.\n` +
-            `If you faced any issue while receiving them, just let us know and we’ll look into it.`
+            `\n-----------------------------------\n` +
+            `Since the products are marked as 'Successful' in our logs, a refund has not been automatically processed.\n\n` +
+            `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n` +
+            `Thank you!`
 
         const message = {
             text: msg,

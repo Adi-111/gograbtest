@@ -671,6 +671,7 @@ export class CustomerService {
             const customer = await this.prisma.whatsAppCustomer.findUnique({ where: { id: customerId } });
             this.logger.log(customer);
             if (customer && newCase) {
+                this.logger.log("welcome1")
                 await this.botService.sendWelcomeMsg(customer.phoneNo, newCase.id);
                 await this.chatService.broadcastNewCase(newCase);
                 if (this.isCurrentTimeBetween()) {
@@ -692,6 +693,7 @@ export class CustomerService {
         const condition2 = targetTime() !== null && targetTime() < now;
 
         if (condition1 || condition2) {
+            this.logger.log("welcome2")
             await this.chatService.triggerStatusUpdate(activeCase.id, Status.INITIATED, 5, 'BOT')
             await this.botService.sendWelcomeMsg(activeCase.customer.phoneNo, activeCase.id);
         }
