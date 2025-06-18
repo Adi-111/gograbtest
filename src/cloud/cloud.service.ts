@@ -49,21 +49,14 @@ export class CloudService {
 
             this.logger.log(`Extracted OCR text: ${fullText}`);
 
-            const toGgRe = /(GG[A-Za-z0-9\-]+)/i;
-            let isGGPayment = false;
-            if (fullText.match(toGgRe)) {
-                isGGPayment = true
-            }
+
 
             // Directly search for first standalone 12-digit number
             const match = fullText.match(/\b\d{12}\b/);
 
             if (match) {
                 this.logger.log(`Found 12-digit Transaction ID: ${match[0]}`);
-                return {
-                    utrId: match[0],
-                    isGGPayment: isGGPayment
-                };
+                return match[0]
             } else {
                 this.logger.warn('No valid 12-digit Transaction ID found.');
                 return null;
