@@ -494,7 +494,8 @@ export class CustomerService {
                 return;
             }
 
-            const utrId = await this.cloudService.refundStatus(url);
+            const res = await this.cloudService.refundStatus(url);
+            const utrId = res.utrId;
 
             if (!utrId) {
                 this.logger.warn('No UTR ID extracted from screenshot. Retrying refund screenshot...');
@@ -506,12 +507,16 @@ export class CustomerService {
                 return;
             }
             this.logger.warn(`utrId is ${utrId}`)
-            if (utrId === 'invalid') {
-
+            let txnInfo: TransactionInfoDto;
+            if (res.isGGPayment) {
+                txnInfo = await this.gg_backend_service.bankTxn(utrId);
+            }
+            else {
+                await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
                 return;
             }
 
-            const txnInfo: TransactionInfoDto = await this.gg_backend_service.bankTxn(utrId);
+
 
             if (txnInfo === null) {
                 await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);

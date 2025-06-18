@@ -24,7 +24,7 @@ export class CloudService {
         })
         this.bucketName = process.env.GCP_BUCKET_NAME;
     }
-    async extractTransactionIdFromGCS(filePath: string): Promise<string | null> {
+    async extractTransactionIdFromGCS(filePath: string) {
         try {
             const gcsUri = `gs://${this.bucketName}/${filePath}`;
             this.logger.log(`GCS URI: ${gcsUri}`);
@@ -40,31 +40,39 @@ export class CloudService {
             }
 
             // Pre-clean OCR text
-
-
-            const toGgRe = /To:\s*(GG-[A-Za-z0-9\-]+)/i;
-            const isGGPayment = fullText.match(toGgRe);
-
             fullText = fullText
                 .replace(/\n/g, ' ')
                 .replace(/\s{2,}/g, ' ')
                 .trim();
 
+
+
             this.logger.log(`Extracted OCR text: ${fullText}`);
+
+            const toGgRe = /To:\s*(GG-[A-Za-z0-9\-]+)/i;
+            let isGGPayment = false;
+            if (fullText.match(toGgRe)) {
+                isGGPayment = true
+            }
+
             // Directly search for first standalone 12-digit number
             const match = fullText.match(/\b\d{12}\b/);
 
             if (match) {
                 this.logger.log(`Found 12-digit Transaction ID: ${match[0]}`);
-                return match[0];
+                return {
+                    utrId: match[0],
+                    isGGPayment: isGGPayment
+                };
             } else {
                 this.logger.warn('No valid 12-digit Transaction ID found.');
                 return null;
             }
 
-            // else {
-            //     return 'invalid';
-            // }
+
+
+
+
 
         } catch (error) {
             this.logger.error('Error during OCR processing:', error);
