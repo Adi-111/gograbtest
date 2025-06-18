@@ -49,7 +49,7 @@ export class CloudService {
 
             this.logger.log(`Extracted OCR text: ${fullText}`);
 
-            const toGgRe = /(GG-[A-Za-z0-9\-]+)/i;
+            const toGgRe = /(GG[A-Za-z0-9\-]+)/i;
             let isGGPayment = false;
             if (fullText.match(toGgRe)) {
                 isGGPayment = true
