@@ -527,7 +527,11 @@ export class CustomerService {
 
 
             if (txnInfo && txnInfo.order_id) {
-                vendDetails = await this.gg_backend_service.getVendDetails(txnInfo.order_id);
+                vendDetails = await this.gg_backend_service.getVendDetails(txnInfo.order_id)
+                if (!vendDetails.vendItems[0] || vendDetails.vendItems[0] === null) {
+                    await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
+                    return
+                }
                 await this.gg_backend_service.createCustomerDetails(vendDetails, caseId)
             }
 
@@ -545,7 +549,7 @@ export class CustomerService {
                 const caseMeta = (caseRecord?.meta ?? {}) as Prisma.JsonObject;
                 const tries = Number(caseMeta.refundScreenshotTries || 0) + 1;
                 if (caseMeta?.refundScreenshotActive) {
-                    await this.handleRefundRetry(caseId, phoneNo, 'screenshot2');
+                    await this.handleRefundRetry(caseId, phoneNo, 'screenshot5');
                     await this.prisma.case.update({ where: { id: caseId }, data: { lastBotNodeId: 'main_question-fXmet', meta: { refundScreenshotActive: true, refundScreenshotTries: tries } } })
                 }
                 return;
