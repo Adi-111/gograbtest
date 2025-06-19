@@ -387,7 +387,7 @@ export class BotService {
                 `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n`;
         } else {
             // This handles cases where there's at least one failed dispense, or a mix.
-            msg += `Refund hasn’t been processed yet for this one. Please wait a bit—our team will check and get back to you shortly.\n\n`;  // Added a "Thank you!" for consistency, feel free to adjust.
+            msg += `\nRefund hasn’t been processed yet for this one. Please wait a bit—our team will check and get back to you shortly.\n\n`;  // Added a "Thank you!" for consistency, feel free to adjust.
         }
         const message = {
             text: msg,

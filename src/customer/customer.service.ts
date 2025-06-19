@@ -545,7 +545,7 @@ export class CustomerService {
                 const caseMeta = (caseRecord?.meta ?? {}) as Prisma.JsonObject;
                 const tries = Number(caseMeta.refundScreenshotTries || 0) + 1;
                 if (caseMeta?.refundScreenshotActive) {
-                    await this.handleRefundRetry(caseId, phoneNo, 'screenshot5');
+                    await this.handleRefundRetry(caseId, phoneNo, 'screenshot2');
                     await this.prisma.case.update({ where: { id: caseId }, data: { lastBotNodeId: 'main_question-fXmet', meta: { refundScreenshotActive: true, refundScreenshotTries: tries } } })
                 }
                 return;
