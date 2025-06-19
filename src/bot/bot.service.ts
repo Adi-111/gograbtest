@@ -335,6 +335,8 @@ export class BotService {
         detail: MergedProductDetail
     ) {
         const { vendItems, productItems } = detail
+        let allVendsSuccessful = true;
+
 
         // Header
         let msg =
@@ -368,6 +370,9 @@ export class BotService {
 
                 // decide icon & text
                 const success = vend.vend_status.toLowerCase() === "dispense_successful"
+                if (!success) {
+                    allVendsSuccessful = false;
+                }
                 const icon = success ? "✅" : "❌"
                 const statusText = success ? "Successful" : "Failed"
 
@@ -376,11 +381,16 @@ export class BotService {
             .join("\n")
 
         // Footer
-        msg +=
-            `\n-----------------------------------\n` +
-            `Since the products are marked as 'Successful' in our logs, a refund has not been automatically processed.\n\n` +
-            `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n`
-
+        if (allVendsSuccessful) {
+            msg +=
+                `Since the products are marked as 'Successful' in our logs, a refund has not been automatically processed.\n\n` +
+                `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n` +
+                `Thank you!`;
+        } else {
+            // This handles cases where there's at least one failed dispense, or a mix.
+            msg += `Refund hasn’t been processed yet for this one. Please wait a bit—our team will check and get back to you shortly.\n\n` +
+                `Thank you!`; // Added a "Thank you!" for consistency, feel free to adjust.
+        }
         const message = {
             text: msg,
             type: MessageType.TEXT,
