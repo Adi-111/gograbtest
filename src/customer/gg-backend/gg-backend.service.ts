@@ -149,6 +149,7 @@ export class GGBackendService {
             return VendItem;
         } catch (error) {
             this.logger.warn(`error fetching Vend Item Details:${error}`)
+            return null;
         }
     }
 
