@@ -528,10 +528,6 @@ export class CustomerService {
 
             if (txnInfo && txnInfo.order_id) {
                 vendDetails = await this.gg_backend_service.getVendDetails(txnInfo.order_id);
-                if (vendDetails = { vendItems: [], productItems: [], machine_id: '' }) {
-                    await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
-                    return;
-                }
                 await this.gg_backend_service.createCustomerDetails(vendDetails, caseId)
             }
 
