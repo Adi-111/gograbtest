@@ -338,7 +338,7 @@ export class BotService {
 
         // Header
         let msg =
-            `Hello!\n\nWe've checked our machine logs for your recent order. Here's a quick summary of what happened:\n\n` +
+            `We've checked our machine logs for your recent order. Here's a quick summary of what happened:\n\n` +
             `*Product Delivery Status*\n` +
             `-----------------------------------\n` +
             `Time        | Product             | Status\n` +
@@ -379,8 +379,7 @@ export class BotService {
         msg +=
             `\n-----------------------------------\n` +
             `Since the products are marked as 'Successful' in our logs, a refund has not been automatically processed.\n\n` +
-            `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n` +
-            `Thank you!`
+            `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n`
 
         const message = {
             text: msg,
