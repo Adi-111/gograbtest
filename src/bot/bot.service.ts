@@ -361,6 +361,7 @@ export class BotService {
                         ? new Date(vend.vend_time)
                         : vend.vend_time
                 const formattedTime = ts.toLocaleString("en-US", {
+                    timeZone: 'Asia/Kolkata',
                     month: "short",
                     day: "2-digit",
                     hour: "numeric",
