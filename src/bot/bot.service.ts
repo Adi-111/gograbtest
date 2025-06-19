@@ -383,7 +383,7 @@ export class BotService {
         // Footer
         if (allVendsSuccessful) {
             msg +=
-                `Since the products are marked as 'Successful' in our logs, a refund has not been automatically processed.\n\n` +
+                `\nSince the products are marked as 'Successful' in our logs, a refund has not been automatically processed.\n\n` +
                 `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n`;
         } else {
             // This handles cases where there's at least one failed dispense, or a mix.
