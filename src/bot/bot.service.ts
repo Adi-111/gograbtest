@@ -376,7 +376,7 @@ export class BotService {
                 const icon = success ? "✅" : "❌"
                 const statusText = success ? "Successful" : "Failed"
 
-                return `${formattedTime} | ${productName} | ${icon} ${statusText}`
+                return `${formattedTime} | ${productName} | ${icon} ${statusText} \n`
             })
             .join("\n")
 
