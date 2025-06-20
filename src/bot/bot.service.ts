@@ -409,7 +409,7 @@ export class BotService {
                 phoneNo
             }
         })
-        const framedMsg = `👋Hi, ${cus.name}\n🎊 Welcome to Go-Grab! Our goal is to uplift your mood and fulfill your cravings.  \n💡 How can we further enhance your experience today? Please choose one of the options from the menu below. 🍟🥤`;
+        const framedMsg = `Hi, ${cus.name} 😊\nWelcome to Go-Grab Support!\nWe’re here to help and make sure you’re always snack-happy 🍿\nPlease choose an option from the menu below 👇`;
         const framedBody = { "sections": [{ "rows": [{ "id": "main_buttons-bCVmo", "title": "Order Fail/Refund Issues", "description": "" }, { "id": "main_buttons-hSJwk", "title": "Machine Issues", "description": "" }, { "id": "main_question-sZPbm", "title": "Product Quality Issues", "description": "" }, { "id": "main_message-DqzXV", "title": "RFID Card Recharge", "description": "" }, { "id": "main_question-nyJZr", "title": "Suggestions or Feedback", "description": "" }, { "id": "main_question-FyKfq", "title": "Others", "description": "" }], "title": "Please select" }] }
         const message = {
             text: framedMsg,
@@ -431,6 +431,10 @@ export class BotService {
             buttonText: 'Options',
             footer: '',
             sections: framedBody.sections,
+        });
+        await this.prisma.case.update({
+            where: { id: caseId },
+            data: { lastBotNodeId: 'hi' },
         });
         await this.prisma.message.update({
             where: { id: savedMessage.id },
