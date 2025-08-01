@@ -22,5 +22,20 @@ CREATE TABLE "Product" (
     CONSTRAINT "Product_pkey" PRIMARY KEY ("product_id")
 );
 
+-- CreateTable
+CREATE TABLE "CustomerOrderDetails" (
+    "id" SERIAL NOT NULL,
+    "customerId" INTEGER NOT NULL,
+    "coils" TEXT[],
+    "productIds" TEXT[],
+    "dispenseStatuses" TEXT[],
+    "machine_id" TEXT,
+    "verdict" TEXT,
+    "orderTime" TIMESTAMP(3) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "CustomerOrderDetails_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Product_product_id_key" ON "Product"("product_id");

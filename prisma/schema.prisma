@@ -1,11 +1,11 @@
 generator client {
   provider = "prisma-client-js"
 }
-
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 
 model Bot {
   id        Int       @id @default(autoincrement())
@@ -335,4 +335,61 @@ model CustomerOrderDetails {
   verdict String?
   orderTime DateTime
   created_at DateTime  @default(now())
+}
+
+model DailyAnalytics {
+  id                    Int      @id @default(autoincrement())
+  date                  DateTime @unique @db.Date
+  
+  // Basic counts
+  casesOpened           Int      @default(0)
+  casesPending          Int      @default(0)
+  casesSolved           Int      @default(0)
+  casesSolvedByOperator Int      @default(0)
+  casesSolvedByBot      Int      @default(0)
+  casesExpired          Int      @default(0)
+  casesProcessing       Int      @default(0)
+  missedChats           Int      @default(0)
+  
+  // Duration metrics (in minutes)
+  avgCaseDuration       Float?   @default(0)
+  totalCaseDuration     Float?   @default(0)
+  
+  // Metadata
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  @@index([date])
+}
+
+model TagAnalytics {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @db.Date
+  tagText   String
+  count     Int      @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([date, tagText])
+  @@index([date])
+  @@index([tagText])
+}
+
+model OverallAnalytics {
+  id                    Int      @id @default(autoincrement())
+  
+  // Current state counters
+  totalCases            Int      @default(0)
+  casesProcessing       Int      @default(0)
+  casesSolved           Int      @default(0)
+  casesSolvedByBot      Int      @default(0)
+  casesSolvedByOperator Int      @default(0)
+  casesExpired          Int      @default(0)
+  casesOpen             Int      @default(0)
+  
+  // Last updated
+  lastUpdated           DateTime @default(now())
+  
+  @@map("overall_analytics")
 }
