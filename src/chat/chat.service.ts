@@ -9,6 +9,7 @@ import { CaseEntity } from 'src/cases/entity/case.entity';
 import { QuickMessage } from './dto/quick-message.dto';
 import { FailedMessageDto } from './dto/failed-message.dto';
 import { emit } from 'process';
+import { CaseInstanceService } from 'src/case-instance/case-instance.service';
 
 
 @Injectable()
@@ -213,7 +214,7 @@ export class ChatService {
 
         return results;
     }
- 
+
     private fullMessageIncludes() {
         return {
             user: true,
@@ -552,5 +553,8 @@ export class ChatService {
         });
         if (savedMessage) await this.notifyClients(savedMessage);
     }
+
+
+
 
 }
