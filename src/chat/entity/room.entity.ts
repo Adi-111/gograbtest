@@ -9,6 +9,10 @@ export class RoomEntity implements Case {
     ) {
         Object.assign(this, partial);
     }
+    currentInstanceId: number;
+    reopenCount: number;
+    firstOpenedAt: Date;
+    lastClosedAt: Date;
 
     @IsNumber()
     id: number;

@@ -840,7 +840,7 @@ export class CustomerService {
 
         const savedM = await this.prisma.message.create({
             data: messageData,
-            include: { media: true, location: true, WhatsAppCustomer: true },
+            include: { media: true, location: true, whatsAppCustomer: true },
         });
         this.logger.log(savedM);
 

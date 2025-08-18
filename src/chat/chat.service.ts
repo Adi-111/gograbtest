@@ -33,7 +33,7 @@ export class ChatService {
                 include: {
                     user: true,
                     bot: true,
-                    WhatsAppCustomer: true,
+                    whatsAppCustomer: true,
                     case: true,
                     media: true,
                     location: true,
@@ -103,7 +103,7 @@ export class ChatService {
                         ...(createMessageDto.userId && { user: { connect: { id: createMessageDto.userId } } }),
                         ...(createMessageDto.botId && { bot: { connect: { id: createMessageDto.botId } } }),
                         ...(createMessageDto.whatsAppCustomerId && {
-                            WhatsAppCustomer: { connect: { id: createMessageDto.whatsAppCustomerId } }
+                            whatsAppCustomer: { connect: { id: createMessageDto.whatsAppCustomerId } }
                         }),
                         ...(createMessageDto.mediaId && { media: { connect: { id: createMessageDto.mediaId } } }),
 
@@ -213,12 +213,12 @@ export class ChatService {
 
         return results;
     }
-
+ 
     private fullMessageIncludes() {
         return {
             user: true,
             bot: true,
-            WhatsAppCustomer: true,
+            whatsAppCustomer: true,
             media: true,
             location: true,
             interactive: true,
@@ -243,7 +243,7 @@ export class ChatService {
                 include: {
                     user: true,
                     bot: true,
-                    WhatsAppCustomer: true,
+                    whatsAppCustomer: true,
                     media: true,
                     location: true,
                     interactive: true,
@@ -264,7 +264,7 @@ export class ChatService {
                 include: {
                     user: true,
                     bot: true,
-                    WhatsAppCustomer: true,
+                    whatsAppCustomer: true,
                 }
             });
 
@@ -524,7 +524,7 @@ export class ChatService {
             include: {
                 user: true,
                 bot: true,
-                WhatsAppCustomer: true,
+                whatsAppCustomer: true,
                 media: true,
                 location: true,
                 interactive: true,
@@ -533,7 +533,7 @@ export class ChatService {
                     include: {
                         user: true,
                         bot: true,
-                        WhatsAppCustomer: true
+                        whatsAppCustomer: true
                     }
                 },
                 replies: true,

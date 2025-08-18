@@ -291,7 +291,7 @@ export class ChatGateway
         include: {
           user: true,
           bot: true,
-          WhatsAppCustomer: true,
+          whatsAppCustomer: true,
           media: true,
           location: true,
           interactive: true,
@@ -425,7 +425,7 @@ export class ChatGateway
         include: {
           user: true,
           bot: true,
-          WhatsAppCustomer: true,
+          whatsAppCustomer: true,
           media: true,
           location: true,
           interactive: true,
@@ -892,9 +892,9 @@ export class ChatGateway
       case SenderType.CUSTOMER:
         return {
           type: 'customer',
-          id: message.WhatsAppCustomer?.id,
-          name: message.WhatsAppCustomer?.name,
-          phone: message.WhatsAppCustomer?.phoneNo,
+          id: message.whatsAppCustomer?.id,
+          name: message.whatsAppCustomer?.name,
+          phone: message.whatsAppCustomer?.phoneNo,
         };
       default:
         return { type: 'unknown' };

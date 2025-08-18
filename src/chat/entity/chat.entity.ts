@@ -9,6 +9,7 @@ export class ChatEntity implements Message {
     constructor(partial: Partial<ChatEntity>) {
         Object.assign(this, partial);
     }
+    caseInstanceId: number;
 
 
     @ApiProperty()
@@ -61,7 +62,7 @@ export class ChatEntity implements Message {
     @ApiPropertyOptional()
     whatsAppCustomerId: number | null;
 
-    WhatsAppCustomer: WhatsAppCustomer;
+    whatsAppCustomer: WhatsAppCustomer;
 
     @ApiPropertyOptional()
     parentMessageId: number | null;

@@ -1,0 +1,10 @@
+onlyBuiltDependencies:
+  - '@nestjs/core'
+  - '@newrelic/fn-inspect'
+  - '@newrelic/native-metrics'
+  - '@prisma/client'
+  - '@prisma/engines'
+  - '@scarf/scarf'
+  - bcrypt
+  - prisma
+  - protobufjs
