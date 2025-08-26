@@ -7,9 +7,8 @@ import { BotService } from 'src/bot/bot.service';
 import { CloudService } from 'src/cloud/cloud.service';
 import { GGBackendService } from './gg-backend/gg-backend.service';
 import { TransactionInfoDto } from './gg-backend/dto/transaction-info.dto';
-import { FailedMessageDto } from 'src/chat/dto/failed-message.dto';
 import { MergedProductDetail } from './types';
-import { EpisodeManager } from './episode-manager';
+import { WAComponent } from './dto/send-template.dto';
 
 
 
@@ -73,7 +72,6 @@ export class CustomerService {
         @Inject(forwardRef(() => BotService))
         private readonly botService: BotService,
         private readonly prisma: PrismaService,
-        private readonly episodeManager: EpisodeManager,
         private readonly cloudService: CloudService,
         private readonly gg_backend_service: GGBackendService
     ) { }
@@ -308,7 +306,13 @@ export class CustomerService {
 
             if (lastBotNodeId === 'stop') {
                 this.logger.warn(`Bot is stopped for case ${caseRecord.id}, ignoring message.`);
-                return { customer, case: caseRecord };
+                const updatedCase = await this.prisma.case.update({
+                    where: { id: caseRecord.id }, data: {
+                        assignedTo: CaseHandler.USER,
+                        lastBotNodeId: null
+                    }
+                })
+                return { customer, case: updatedCase };
             }
 
 
@@ -657,60 +661,70 @@ export class CustomerService {
 
 
     private async handleCaseManagement(customerId: number) {
-        let activeCase = await this.prisma.case.findFirst({
-            where: { customerId },
-            include: { customer: true }
+        const activeCase = await this.prisma.case.findFirst({
+            where: {
+                customerId,
+            },
+            include: { customer: true, }
         });
-
         if (!activeCase) {
-            activeCase = await this.prisma.case.create({
+            const newCase = await this.prisma.case.create({
                 data: {
                     status: Status.INITIATED,
                     customerId,
                     assignedTo: CaseHandler.BOT,
                     timer: new Date(Date.now() + 24 * 60 * 60 * 1000),
-                    isNewCase: true
                 },
-                include: { customer: true }
+                include: {
+                    customer: true,
+                    notes: true
+                }
             });
-
-            // Create first episode
-            await this.episodeManager.getOrCreateCurrentInstance(activeCase.id);
-
-            // onboarding
-            await this.botService.sendWelcomeMsg(activeCase.customer.phoneNo, activeCase.id);
-            await this.chatService.broadcastNewCase(activeCase);
-            if (this.isCurrentTimeBetween()) {
-                await this.botService.botSendByNodeId('off-time', activeCase.customer.phoneNo, activeCase.id);
+            const customer = await this.prisma.whatsAppCustomer.findUnique({ where: { id: customerId } });
+            this.logger.log(customer);
+            if (customer && newCase) {
+                this.logger.log("welcome1")
+                await this.botService.sendWelcomeMsg(customer.phoneNo, newCase.id);
+                await this.chatService.broadcastNewCase(newCase);
+                if (this.isCurrentTimeBetween()) {
+                    await this.botService.botSendByNodeId('off-time', customer.phoneNo, newCase.id);
+                }
             }
-            return activeCase;
+            return newCase;
         }
+        if (activeCase && activeCase.isNewCase) await this.prisma.case.update({ where: { id: activeCase.id }, data: { isNewCase: false } });
 
-        if (activeCase.isNewCase) {
-            await this.prisma.case.update({ where: { id: activeCase.id }, data: { isNewCase: false } });
-        }
+        const now: Date = new Date();
+        const targetTime = () => {
+            if (activeCase && activeCase.timer) {
+                return new Date(activeCase.timer);
+            }
+            return null;
+        };
+        const condition1 = activeCase && activeCase.status === Status.SOLVED;
+        const condition2 = targetTime() !== null && targetTime() < now;
 
-        const now = new Date();
-        const expired = activeCase.timer && activeCase.timer < now;
-        const wasSolved = activeCase.status === Status.SOLVED;
-
-        if (expired || wasSolved) {
-            // Re-open flow: open a fresh episode and (optionally) send welcome
-            await this.setCaseStatus(activeCase.id, Status.INITIATED, 5, CaseHandler.BOT);
+        if (condition1 || condition2) {
+            this.logger.log("welcome2")
+            await this.chatService.triggerStatusUpdate(activeCase.id, Status.INITIATED, 5, 'BOT')
             await this.botService.sendWelcomeMsg(activeCase.customer.phoneNo, activeCase.id);
         }
-
-        // If the bot ended with 'main_message-ILtoz', mark SOLVED but keep current/close via setCaseStatus
-        if (activeCase.lastBotNodeId === 'main_message-ILtoz') {
-            await this.setCaseStatus(activeCase.id, Status.SOLVED, 5);
+        if (activeCase && activeCase.lastBotNodeId === 'main_message-ILtoz') {
+            await this.prisma.case.update({ where: { id: activeCase.id }, data: { status: Status.SOLVED } })
         }
 
-        return await this.prisma.case.findUnique({
-            where: { id: activeCase.id },
-            include: { customer: true }
-        });
-    }
+        if (activeCase) {
+            const newCase = await this.prisma.case.findUnique({
+                where: {
+                    id: activeCase.id,
+                },
+                include: { customer: true, }
+            });
+            return newCase;
+        }
 
+
+    }
 
     async getApprovedTemplates() {
         const wabaId = process.env.WABA_ID
@@ -737,49 +751,30 @@ export class CustomerService {
         }
     }
 
-    async sendTemplateMessage(
-        to: string,
-        templateName: string,
-        languageCode = "en_US",
-        parameters: { type: string; text: string }[] = []
-    ) {
-        this.logger.log(`sending template with template Name: ${templateName}, language code: ${languageCode} `);
-        const payload = {
-            messaging_product: 'whatsapp',
-            to,
-            type: 'template',
+    async sendWhatsAppTemplate(args: {
+        to: string;
+        template: { name: string; languageCode: string; components?: WAComponent[] };
+    }) {
+        const payload: any = {
+            messaging_product: "whatsapp",
+            to: args.to,
+            type: "template",
             template: {
-                name: templateName.trim(),
-                language: {
-                    code: 'en'
-                },
-                components: [
-                    {
-                        type: 'body',
-                        parameters,
-                    }
-                ]
-            }
+                name: args.template.name.trim(),
+                language: { code: args.template.languageCode },
+                ...(args.template.components?.length
+                    ? { components: args.template.components }
+                    : {}),
+            },
         };
 
-        try {
-            const response = await axios.post(this.apiUrl, payload, {
-                headers: {
-                    Authorization: `Bearer ${this.accessToken}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            this.logger.log(`Template message sent to ${to}`);
-            return response.data;
-        } catch (error) {
-            const axiosError = error as AxiosError;
-            this.logger.error('WhatsApp Template API Error', {
-                url: this.apiUrl,
-                error: axiosError.response?.data,
-                status: axiosError.response?.status
-            });
-            throw error;
-        }
+        const res = await axios.post(this.apiUrl, payload, {
+            headers: {
+                Authorization: `Bearer ${this.accessToken}`,
+                "Content-Type": "application/json",
+            },
+        });
+        return res.data;
     }
 
 
@@ -789,7 +784,6 @@ export class CustomerService {
         customerId: number,
         caseId: number
     ) {
-        const currentInst = await this.episodeManager.getOrCreateCurrentInstance(caseId);
         let media;
 
         if (message.type === 'image' || message.type === 'video') {
@@ -823,7 +817,6 @@ export class CustomerService {
             type: this.mapMessageType(message.type),
             senderType: SenderType.CUSTOMER,
             whatsAppCustomerId: customerId,
-            caseInstanceId: currentInst.id,
             caseId,
             recipient: this.phoneNumberId,
             timestamp: new Date(parseInt(message.timestamp) * 1000),
@@ -834,7 +827,7 @@ export class CustomerService {
 
         const savedM = await this.prisma.message.create({
             data: messageData,
-            include: { media: true, location: true, whatsAppCustomer: true },
+            include: { media: true, location: true, WhatsAppCustomer: true },
         });
         this.logger.log(savedM);
 
@@ -1062,57 +1055,5 @@ export class CustomerService {
             console.error("Error updating agent deadline:", error);
         }
     }
-
-    // in CustomerService (or a CaseService)
-    async setCaseStatus(caseId: number, newStatus: Status, actorUserId?: number, assignedTo?: CaseHandler) {
-        // Episode transitions:
-        // - When moving to SOLVED/UNSOLVED → close current episode
-        // - When moving to INITIATED/BOT_HANDLING/PROCESSING/ASSIGNED from a terminal (or time-expired) state → open/get current episode
-
-        const caseRow = await this.prisma.case.findUnique({ where: { id: caseId }, select: { status: true } });
-        const from = caseRow?.status;
-
-        // Open episode on (re)start-like statuses
-        if (['INITIATED', 'BOT_HANDLING', 'PROCESSING', 'ASSIGNED'].includes(newStatus)) {
-            await this.episodeManager.getOrCreateCurrentInstance(caseId);
-        }
-
-        // Close episode on terminal statuses
-        if (['SOLVED', 'UNSOLVED'].includes(newStatus)) {
-            await this.episodeManager.closeCurrentInstance(caseId, newStatus as any);
-        }
-
-        // Persist case status/assignee
-        await this.prisma.case.update({
-            where: { id: caseId },
-            data: {
-                status: newStatus,
-                ...(assignedTo ? { assignedTo } : {}),
-                ...(newStatus === Status.INITIATED ? { reopenCount: { increment: from && from !== Status.INITIATED ? 1 : 0 } } : {}),
-                updatedAt: new Date(),
-            }
-        });
-
-        // Record StatusEvent bound to current (or last) episode
-        const currentInstance = await this.prisma.case.findUnique({
-            where: { id: caseId },
-            select: { currentInstanceId: true }
-        });
-
-        await this.prisma.statusEvent.create({
-            data: {
-                caseId,
-                userId: actorUserId ?? 5, // your default system user
-                previousStatus: from ?? Status.INITIATED,
-                newStatus,
-                timestamp: new Date(),
-                caseInstanceId: currentInstance?.currentInstanceId ?? null,
-            }
-        });
-
-        // fire your existing broadcast hooks
-        await this.chatService.triggerStatusUpdate(caseId, newStatus, actorUserId ?? 5, assignedTo ?? undefined);
-    }
-
 
 }

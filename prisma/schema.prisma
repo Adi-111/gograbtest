@@ -5,159 +5,6 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
-/// New: Each open/close cycle of a Case.
-model CaseInstance {
-  id            Int           @id @default(autoincrement())
-  caseId        Int
-  case          Case          @relation(fields: [caseId], references: [id]) // 1:N to Case
-
-  // Back side of the 1:1 "CurrentInstance" relation
-  currentOf     Case?         @relation(name: "CurrentInstance")
-
-  sequence      Int
-  status        Status        @default(INITIATED)
-  assignedTo    CaseHandler   @default(BOT)
-  startedAt     DateTime      @default(now())
-  endedAt       DateTime?
-  durationMins  Float?
-  unread        Int?
-  lastBotNodeId String?
-  meta          Json?
-
-  machine_id    String?
-  messages      Message[]
-  statusEvents  StatusEvent[]
-  notes         Note[]
-
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-
-  @@unique([caseId, sequence])
-  @@index([caseId])
-  @@index([status])
-}
-
-model Case {
-  id                  Int              @id @default(autoincrement())
-  status              Status           @default(INITIATED)
-  assignedTo          CaseHandler      @default(BOT)
-  unread              Int?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
-
-  messages            Message[]
-  customer            WhatsAppCustomer @relation(fields: [customerId], references: [id])
-  customerId          Int
-  user                User?            @relation(fields: [userId], references: [id])
-  userId              Int?
-  bot                 Bot?             @relation(fields: [botId], references: [id])
-  botId               Int?
-  timer               DateTime?
-  tags                Tag[]            @relation("CaseTags")
-  lastBotNodeId       String?
-  notes               Note[]
-  meta                Json?
-  statusEvent         StatusEvent[]
-  failedMsgEvent      FailedMsgEvent[]
-  isNewCase           Boolean          @default(true)
-
-  // Link to all instances + fast access to current
-  instances           CaseInstance[]
-
-  // 1:1 pointer to whichever instance is current
-  currentInstanceId   Int?             @unique
-  currentInstance     CaseInstance?    @relation(name: "CurrentInstance", fields: [currentInstanceId], references: [id], onDelete: SetNull)
-
-  // Optional helpful counters
-  reopenCount         Int              @default(0)
-  firstOpenedAt       DateTime?
-  lastClosedAt        DateTime?
-
-  @@index([status])
-  @@index([customerId])
-}
-
-
-/// Update: messages can belong to a specific CaseInstance.
-model Message {
-  id           Int                  @id @default(autoincrement())
-  type         MessageType
-  replyType    ReplyType?
-  senderType   SenderType
-  text         String?
-  recipient    String?
-  timestamp    DateTime             @default(now())
-  waMessageId  String?
-  context      Json?
-  media        Media?
-  location     Location?
-  contacts     Contact[]
-  interactive  Interactive?
-  systemStatus SystemMessageStatus?
-  error        Json?
-
-  user               User?             @relation(fields: [userId], references: [id])
-  userId             Int?
-  bot                Bot?              @relation(fields: [botId], references: [id])
-  botId              Int?
-  parentMessage      Message?          @relation("MessageReplies", fields: [parentMessageId], references: [id])
-  parentMessageId    Int?
-  replies            Message[]         @relation("MessageReplies")
-  case               Case?             @relation(fields: [caseId], references: [id])
-  caseId             Int?
-  whatsAppCustomer   WhatsAppCustomer? @relation(fields: [whatsAppCustomerId], references: [id])
-  whatsAppCustomerId Int?
-
-  /// New: episode-level linkage
-  caseInstanceId     Int?
-  caseInstance       CaseInstance?     @relation(fields: [caseInstanceId], references: [id])
-
-  @@index([senderType])
-  @@index([recipient])
-  @@index([timestamp])
-  @@index([type])
-  @@index([caseId])
-  @@index([caseInstanceId])
-}
-
-/// Update: Status events can be tied to a specific instance too.
-model StatusEvent {
-  id             Int      @id @default(autoincrement())
-  caseId         Int
-  case           Case     @relation(fields: [caseId], references: [id])
-  userId         Int
-  user           User     @relation(fields: [userId], references: [id])
-  previousStatus Status
-  newStatus      Status
-  timestamp      DateTime @default(now())
-
-  /// New: optional link to the episode it belongs to
-  caseInstanceId Int?
-  caseInstance   CaseInstance? @relation(fields: [caseInstanceId], references: [id])
-
-  @@index([caseId])
-  @@index([caseInstanceId])
-}
-
-/// Update: Notes often belong to a specific episode too
-model Note {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-  caseId    Int
-  case      Case     @relation(fields: [caseId], references: [id])
-
-  /// New: optional association to an instance
-  caseInstanceId Int?
-  caseInstance   CaseInstance? @relation(fields: [caseInstanceId], references: [id])
-
-  text      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([caseId])
-  @@index([caseInstanceId])
-}
 
 
 model Bot {
@@ -241,7 +88,45 @@ model WhatsAppCustomer {
   message         Message[]
 }
 
+model Case {
+  id             Int              @id @default(autoincrement())
+  status         Status           @default(INITIATED)
+  assignedTo     CaseHandler      @default(BOT)
+  unread         Int?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  messages       Message[]
+  customer       WhatsAppCustomer @relation(fields: [customerId], references: [id])
+  customerId     Int
+  user           User?            @relation(fields: [userId], references: [id])
+  userId         Int?
+  bot            Bot?             @relation(fields: [botId], references: [id])
+  botId          Int?
+  timer          DateTime?
+  tags           Tag[]            @relation("CaseTags")
+  lastBotNodeId  String?
+  notes          Note[]
+  meta           Json?
+  statusEvent    StatusEvent[]
+  failedMsgEvent FailedMsgEvent[]
+  isNewCase      Boolean          @default(true)
 
+  @@index([status])
+  @@index([customerId])
+}
+
+model StatusEvent {
+  id             Int      @id @default(autoincrement())
+  caseId         Int
+  case           Case     @relation(fields: [caseId], references: [id])
+  userId         Int
+  user           User     @relation(fields: [userId], references: [id])
+  previousStatus Status
+  newStatus      Status
+  timestamp      DateTime @default(now())
+
+  @@index([caseId])
+}
 
 model FailedMsgEvent {
   id        Int      @id @default(autoincrement())
@@ -257,7 +142,16 @@ model FailedMsgEvent {
   @@index([caseId])
 }
 
-
+model Note {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  caseId    Int
+  case      Case     @relation(fields: [caseId], references: [id])
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
 
 model Tag {
   id        Int      @id @default(autoincrement())
@@ -269,7 +163,41 @@ model Tag {
   updatedAt DateTime @updatedAt
 }
 
+model Message {
+  id           Int                  @id @default(autoincrement())
+  type         MessageType
+  replyType    ReplyType?
+  senderType   SenderType
+  text         String?
+  recipient    String?
+  timestamp    DateTime             @default(now())
+  waMessageId  String?
+  context      Json?
+  media        Media?
+  location     Location?
+  contacts     Contact[]
+  interactive  Interactive?
+  systemStatus SystemMessageStatus?
+  error        Json?
 
+  // Relationships
+  user               User?             @relation(fields: [userId], references: [id])
+  userId             Int?
+  bot                Bot?              @relation(fields: [botId], references: [id])
+  botId              Int?
+  parentMessage      Message?          @relation("MessageReplies", fields: [parentMessageId], references: [id])
+  parentMessageId    Int?
+  replies            Message[]         @relation("MessageReplies")
+  case               Case?             @relation(fields: [caseId], references: [id])
+  caseId             Int?
+  WhatsAppCustomer   WhatsAppCustomer? @relation(fields: [whatsAppCustomerId], references: [id])
+  whatsAppCustomerId Int?
+
+  @@index([senderType])
+  @@index([recipient])
+  @@index([timestamp])
+  @@index([type])
+}
 
 model Media {
   id        Int      @id @default(autoincrement())

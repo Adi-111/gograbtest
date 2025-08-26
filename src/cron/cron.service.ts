@@ -7,6 +7,7 @@ import { CustomerService } from 'src/customer/customer.service';
 import { ChatService } from 'src/chat/chat.service';
 import { Status } from '@prisma/client';
 import { ProductDto } from 'src/customer/gg-backend/dto/products.dto';
+import { AnalyticsService } from 'src/analytics/analytics.service';
 
 @Injectable()
 export class CronService {
@@ -14,9 +15,57 @@ export class CronService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly cusService: CustomerService,
-        private readonly chatService: ChatService
+        private readonly chatService: ChatService,
+        private readonly analytics: AnalyticsService,
 
     ) { }
+
+    /**
+   * Every hour: compute rollup for previous hour
+   */
+    @Cron(CronExpression.EVERY_HOUR, { timeZone: 'Asia/Kolkata' })
+    async hourlyAnalytics() {
+        try {
+            this.logger.log('⏳ Starting hourly analytics job...');
+            await this.analytics.calculateHourlyAnalytics();
+            this.logger.log('✅ Hourly analytics updated');
+        } catch (err) {
+            this.logger.error('❌ Hourly analytics job failed', err);
+        }
+    }
+
+    /**
+     * Every midnight: clean old data and rollup yesterday’s stats
+     */
+    @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'Asia/Kolkata' })
+    async dailyAnalytics() {
+        try {
+            this.logger.log('⏳ Starting daily analytics job...');
+            // Calculate for yesterday
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            await this.analytics.calculateAnalyticsForDate(yesterday);
+
+            // Cleanup old data
+            await this.analytics.cleanupOldHourlyData();
+            this.logger.log('✅ Daily analytics + cleanup complete');
+        } catch (err) {
+            this.logger.error('❌ Daily analytics job failed', err);
+        }
+    }
+
+    /**
+     * Every 5 minutes: refresh overall analytics table (for dashboards)
+     */
+    @Cron(CronExpression.EVERY_5_MINUTES, { timeZone: 'Asia/Kolkata' })
+    async refreshOverallAnalytics() {
+        try {
+            await this.analytics.updateOverallAnalytics();
+            this.logger.log('✅ Overall analytics refreshed');
+        } catch (err) {
+            this.logger.error('❌ Failed to refresh overall analytics', err);
+        }
+    }
 
     @Cron(CronExpression.EVERY_WEEK)
     async handleProductCron() {

@@ -13,7 +13,6 @@ import { CustomerController } from './customer.controller';
 import { BotModule } from 'src/bot/bot.module';
 import { CloudModule } from 'src/cloud/cloud.module';
 import { GGBackendModule } from './gg-backend/gg-backend.module';
-import { EpisodeManager } from './episode-manager';
 
 @Module({
   imports: [
@@ -25,7 +24,7 @@ import { EpisodeManager } from './episode-manager';
     forwardRef(() => ChatModule),
   ],
   controllers: [CustomerController],
-  providers: [CustomerService, Logger, EpisodeManager],
+  providers: [CustomerService, Logger],
   exports: [CustomerService],
 })
 export class CustomerModule { }

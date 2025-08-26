@@ -156,7 +156,7 @@ export class ChatGateway
       if (payload?.status === 'EXPIRED') {
         baseWhere.AND = [
           { timer: { lt: new Date() } },
-          { status: { not: Status.SOLVED } },
+          { status: { not: Status.SOLVED } }, ``
         ];
       } else if (payload?.status) {
         baseWhere.status = payload.status;
@@ -191,8 +191,17 @@ export class ChatGateway
         };
       }
 
-      // Get filtered count using optimized count()
-      const filteredCount = await this.prisma.case.count({ where: baseWhere });
+      // -------- counts (no heavy fetch) --------
+      const [filteredCount, unreadCaseCount, unreadAgg] = await this.prisma.$transaction([
+        this.prisma.case.count({ where: baseWhere }),
+        this.prisma.case.count({ where: { ...baseWhere, unread: { gt: 0 } } }),
+        this.prisma.case.aggregate({
+          where: baseWhere,
+          _sum: { unread: true }, // ignores nulls; returns null if none
+        }),
+      ]);
+
+      const unreadSum = unreadAgg._sum.unread ?? 0;
 
       // Fetch paginated cases
       const paginatedCases = await this.prisma.case.findMany({
@@ -249,9 +258,14 @@ export class ChatGateway
       }
 
       // Unread count
-      const unreadCount = finalCases.filter(chat => (Number(chat.unread) || 0) > 1).length;
+      const unreadCount = finalCases.filter(chat => (Number(chat.unread)) > 0).length;
 
-      this.sendFilteredCount(client, adjustedFilteredCount, unreadCount);
+      if (payload.viewMode === 'ACTIVE') {
+        this.sendFilteredCount(client, adjustedFilteredCount, unreadCount);
+      }
+      else {
+        this.sendFilteredCount(client, adjustedFilteredCount, unreadCaseCount);
+      }
 
       // Emit result
       client.emit(UiEntity.render, {
@@ -291,7 +305,7 @@ export class ChatGateway
         include: {
           user: true,
           bot: true,
-          whatsAppCustomer: true,
+          WhatsAppCustomer: true,
           media: true,
           location: true,
           interactive: true,
@@ -425,7 +439,7 @@ export class ChatGateway
         include: {
           user: true,
           bot: true,
-          whatsAppCustomer: true,
+          WhatsAppCustomer: true,
           media: true,
           location: true,
           interactive: true,
@@ -892,9 +906,9 @@ export class ChatGateway
       case SenderType.CUSTOMER:
         return {
           type: 'customer',
-          id: message.whatsAppCustomer?.id,
-          name: message.whatsAppCustomer?.name,
-          phone: message.whatsAppCustomer?.phoneNo,
+          id: message.WhatsAppCustomer?.id,
+          name: message.WhatsAppCustomer?.name,
+          phone: message.WhatsAppCustomer?.phoneNo,
         };
       default:
         return { type: 'unknown' };
@@ -922,6 +936,7 @@ export class ChatGateway
     try {
       const { userId, caseId, templateName, text } = payload;
       this.trackConnection(client, caseId);
+      this.logger.log(templateName)
       await this.chatService.sendTemplateMessage(templateName, caseId, userId, text);
     } catch (error) {
       this.logger.log(`error while handling quick message:${error}`)
@@ -930,11 +945,7 @@ export class ChatGateway
 
   handleWhatsappMessage(message: ChatEntity): void {
     const room = this.getRoomName(message.caseId);
-    const payload = {
-      caseId: message.caseId,
-      handle: UnreadHandlerEntity.NEWM
-    }
-    this.handleUnreadCount(payload)
+    this.handleUnreadCount(message.caseId)
     this.server.to(room).emit('whatsapp-message', message);
     this.server.to(UiEntity.ChatList).emit('whatsapp-chat', message);
   }
@@ -945,31 +956,61 @@ export class ChatGateway
     this.server.to(UiEntity.ChatList).emit('bot-chat', message);
   }
 
-  async handleUnreadCount(payload: { caseId: number, handle: UnreadHandlerEntity }) {
-    let caseRecord: Case;
-    if (payload.handle === UnreadHandlerEntity.SEEN) {
-      caseRecord = await this.prisma.case.update({
-        where: {
-          id: payload.caseId
+  async handleUnreadCount(caseId: number) {
+    // Pull exactly what we need
+    const c = await this.prisma.case.findUnique({
+      where: { id: caseId },
+      select: {
+        assignedTo: true,
+        unread: true,
+        messages: {
+          orderBy: { timestamp: 'desc' },
+          take: 1,
+          select: { senderType: true },
         },
-        data: {
-          unread: 0
-        }
-      })
+      },
+    });
+
+    if (!c) throw new Error(`Case ${caseId} not found`);
+
+    const lastSender = c.messages[0]?.senderType;
+
+    // Agent replied -> reset to 0
+    if (lastSender === SenderType.USER) {
+      if ((c.unread ?? 0) !== 0) {
+        const updated = await this.prisma.case.update({
+          where: { id: caseId },
+          data: { unread: 0 },
+          select: { unread: true },
+        });
+        return updated.unread;
+      }
+      return 0;
     }
-    else {
-      let uc = (await this.prisma.case.findUnique({ where: { id: payload.caseId } })).unread;
-      uc = uc + 1;
-      caseRecord = await this.prisma.case.update({
-        where: {
-          id: payload.caseId
-        },
-        data: {
-          unread: uc
-        }
-      })
+
+    // Customer message and case is assigned to an agent -> increment
+    if (lastSender === SenderType.CUSTOMER && c.assignedTo === CaseHandler.USER) {
+      // unread can be null, so handle both cases atomically
+      if (c.unread === null) {
+        const updated = await this.prisma.case.update({
+          where: { id: caseId },
+          data: { unread: 1 },
+          select: { unread: true },
+        });
+        return updated.unread;
+      } else {
+        const updated = await this.prisma.case.update({
+          where: { id: caseId },
+          data: { unread: { increment: 1 } },
+          select: { unread: true },
+        });
+        return updated.unread;
+      }
     }
-    return caseRecord.unread;
+
+    // No change scenarios (e.g., case assigned to BOT, or no messages yet)
+    this.logger.log(`unread count update --> ${c.unread}`)
+    return c.unread ?? 0;
   }
   // Log status change in StatusEvent table
   private async recordStatusChange(caseId: number, userId: number, previousStatus: Status, newStatus: Status): Promise<void> {

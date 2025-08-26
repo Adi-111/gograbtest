@@ -9,7 +9,6 @@ import { CaseEntity } from 'src/cases/entity/case.entity';
 import { QuickMessage } from './dto/quick-message.dto';
 import { FailedMessageDto } from './dto/failed-message.dto';
 import { emit } from 'process';
-import { CaseInstanceService } from 'src/case-instance/case-instance.service';
 
 
 @Injectable()
@@ -34,7 +33,7 @@ export class ChatService {
                 include: {
                     user: true,
                     bot: true,
-                    whatsAppCustomer: true,
+                    WhatsAppCustomer: true,
                     case: true,
                     media: true,
                     location: true,
@@ -104,7 +103,7 @@ export class ChatService {
                         ...(createMessageDto.userId && { user: { connect: { id: createMessageDto.userId } } }),
                         ...(createMessageDto.botId && { bot: { connect: { id: createMessageDto.botId } } }),
                         ...(createMessageDto.whatsAppCustomerId && {
-                            whatsAppCustomer: { connect: { id: createMessageDto.whatsAppCustomerId } }
+                            WhatsAppCustomer: { connect: { id: createMessageDto.whatsAppCustomerId } }
                         }),
                         ...(createMessageDto.mediaId && { media: { connect: { id: createMessageDto.mediaId } } }),
 
@@ -219,7 +218,7 @@ export class ChatService {
         return {
             user: true,
             bot: true,
-            whatsAppCustomer: true,
+            WhatsAppCustomer: true,
             media: true,
             location: true,
             interactive: true,
@@ -244,7 +243,7 @@ export class ChatService {
                 include: {
                     user: true,
                     bot: true,
-                    whatsAppCustomer: true,
+                    WhatsAppCustomer: true,
                     media: true,
                     location: true,
                     interactive: true,
@@ -265,7 +264,7 @@ export class ChatService {
                 include: {
                     user: true,
                     bot: true,
-                    whatsAppCustomer: true,
+                    WhatsAppCustomer: true,
                 }
             });
 
@@ -508,53 +507,98 @@ export class ChatService {
         });
 
     }
-    async sendTemplateMessage(templateName: string, caseId: number, userId: number, text: string) {
-        const caseRecord = await this.prisma.case.findUnique({ where: { id: caseId }, select: { customer: true } });
-        const message = {
-            text: `${text}`,
-            type: MessageType.TEXT,
-            senderType: SenderType.USER,
-            caseId,
-            userId,
-            systemStatus: SystemMessageStatus.SENT,
-            timestamp: new Date(),
-            recipient: caseRecord.customer.phoneNo,
-        };
+    async sendTemplateMessage(
+        templateName: string,
+        caseId: number,
+        userId: number,
+        text: string
+    ) {
+        // 1) Fetch case + customer
+        const caseRecord = await this.prisma.case.findUnique({
+            where: { id: caseId },
+            select: { customer: { select: { name: true, phoneNo: true } } }
+        });
+
+
+        // Normalize recipient to digits only (Cloud API accepts E.164 digits without symbols)
+        const to = caseRecord.customer.phoneNo
+        const customerName = caseRecord.customer.name
+
+        // 2) Save the outbound message first
         const savedMessage = await this.prisma.message.create({
-            data: message,
+            data: {
+                text: `${text}`,
+                type: MessageType.TEXT,
+                senderType: SenderType.USER,
+                caseId,
+                userId,
+                systemStatus: SystemMessageStatus.SENT,
+                timestamp: new Date(),
+                recipient: to,
+            },
             include: {
                 user: true,
                 bot: true,
-                whatsAppCustomer: true,
+                WhatsAppCustomer: true,
                 media: true,
                 location: true,
                 interactive: true,
                 contacts: true,
-                parentMessage: {
-                    include: {
-                        user: true,
-                        bot: true,
-                        whatsAppCustomer: true
-                    }
-                },
+                parentMessage: { include: { user: true, bot: true, WhatsAppCustomer: true } },
                 replies: true,
-
                 case: true,
-
             }
         });
-        await this.customerService.sendTemplateMessage(caseRecord.customer.phoneNo, templateName, 'en_US', [{
-            "type": "text",
-            "text": `${caseRecord.customer.name}`
-        }])
-        await this.prisma.message.update({
-            where: { id: savedMessage.id },
-            data: { systemStatus: SystemMessageStatus.DELIVERED },
-        });
-        if (savedMessage) await this.notifyClients(savedMessage);
+
+        try {
+            // 3) Determine the correct language code by looking up approved templates
+            const templates = await this.customerService.getApprovedTemplates();
+            const matches = (templates || []).filter((t: any) => t?.name === templateName);
+
+            if (!matches.length) {
+                throw new Error(`Template "${templateName}" not found among APPROVED templates`);
+            }
+
+            // Prefer "en", then "en_US", else first available language for that name
+            const chosen =
+                matches.find((t: any) => t.language === "en") ??
+                matches.find((t: any) => t.language === "en_US") ??
+                matches[0];
+
+            const languageCode: string = chosen.language;
+
+            this.logger.log(`languageCode === ${languageCode}`)
+
+            // 4) Send via your generalized sender
+            await this.customerService.sendWhatsAppTemplate({
+                to,
+                template: {
+                    name: templateName.trim(),
+                    languageCode,
+                    components: [
+                        { type: "body", parameters: [{ type: "text", text: customerName, parameter_name: 'customer_name' }] }
+                    ]
+                }
+            });
+
+            // 5) Mark delivered and notify
+            await this.prisma.message.update({
+                where: { id: savedMessage.id },
+                data: { systemStatus: SystemMessageStatus.DELIVERED },
+            });
+
+            if (savedMessage) await this.notifyClients({ ...savedMessage, systemStatus: SystemMessageStatus.DELIVERED });
+        } catch (err) {
+            // On any failure, mark FAILED and notify
+            await this.prisma.message.update({
+                where: { id: savedMessage.id },
+                data: { systemStatus: SystemMessageStatus.FAILED },
+            });
+
+            if (savedMessage) await this.notifyClients({ ...savedMessage, systemStatus: SystemMessageStatus.FAILED });
+            throw err;
+        }
     }
-
-
 
 
 }

@@ -7,6 +7,7 @@ import { CustomerService } from './customer.service';
 import { ChatEntity } from 'src/chat/entity/chat.entity';
 import { GGBackendService } from './gg-backend/gg-backend.service';
 import { error } from 'console';
+import { SendTemplateBody, WAComponent } from './dto/send-template.dto';
 
 @Controller('read/webhook')
 @ApiTags('customer')
@@ -48,15 +49,31 @@ export class CustomerController {
     await this.customerService.processIncomingMessage(body);
   }
 
-  @Post('send-t')
-  async sendTemplateMessage(@Body() body: {
-    to: string;
-    templateName: string;
-    languageCode: string;
-    parameters: { type: string; text: string }[];
-  }) {
-    const { to, templateName, languageCode, parameters } = body;
-    return await this.customerService.sendTemplateMessage(to, templateName, languageCode, parameters);
+  @Post("send-t")
+  async sendTemplateMessage(@Body() body: SendTemplateBody) {
+    const { to } = body;
+    if (!to) throw new Error("Field 'to' is required");
+
+    // Build the general template object (supports both old and new shapes)
+    const template =
+      body.template ??
+      {
+        name: (body.templateName ?? "").trim(),
+        languageCode: body.languageCode ?? "en",
+        components:
+          body.parameters && body.parameters.length
+            ? ([{ type: "body", parameters: body.parameters }] as WAComponent[])
+            : [],
+      };
+
+    if (!template?.name?.trim()) throw new Error("Template name is missing or empty");
+    if (!template?.languageCode?.trim()) throw new Error("languageCode is missing or empty");
+
+    // Delegate to your generalized sender in the service
+    return this.customerService.sendWhatsAppTemplate({
+      to,
+      template,
+    });
   }
 
 
