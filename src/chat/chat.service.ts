@@ -8,7 +8,8 @@ import { ChatEntity } from './entity/chat.entity';
 import { CaseEntity } from 'src/cases/entity/case.entity';
 import { QuickMessage } from './dto/quick-message.dto';
 import { FailedMessageDto } from './dto/failed-message.dto';
-import { emit } from 'process';
+import * as newrelic from 'newrelic';
+import { AxiosError } from 'axios';
 
 
 @Injectable()
@@ -71,6 +72,12 @@ export class ChatService {
             userId,
             assignedTo
         });
+    }
+
+    private maskPhone(n?: string | null) {
+        if (!n) return '';
+        // keep last 4 digits, mask the rest
+        return n.replace(/.(?=.{4}$)/g, '•');
     }
 
     // Updated createMessage method
@@ -549,6 +556,7 @@ export class ChatService {
                 case: true,
             }
         });
+        let languageCode: string | undefined;
 
         try {
             // 3) Determine the correct language code by looking up approved templates
@@ -565,7 +573,7 @@ export class ChatService {
                 matches.find((t: any) => t.language === "en_US") ??
                 matches[0];
 
-            const languageCode: string = chosen.language;
+            languageCode = chosen.language;
 
             this.logger.log(`languageCode === ${languageCode}`)
 
@@ -588,15 +596,62 @@ export class ChatService {
             });
 
             if (savedMessage) await this.notifyClients({ ...savedMessage, systemStatus: SystemMessageStatus.DELIVERED });
-        } catch (err) {
-            // On any failure, mark FAILED and notify
+        } catch (e) {
+            // ————— error-only telemetry (New Relic) —————
+            const err = e as AxiosError<any>;
+            const status = err?.response?.status ?? 0;
+            const reason =
+                (err as any)?.code ||
+                (err?.response?.data && (err.response.data.code || err.response.data.error)) ||
+                err?.message ||
+                'Unknown';
+
+            // 1) Full error to APM (Error Inbox / traces)
+            newrelic.noticeError(err, {
+                op: 'sendTemplateMessage',
+                type: 'WhatsAppTemplateSend',
+                templateName,
+                caseId,
+                userId,
+                status,
+                toMasked: this.maskPhone(to),
+                languageCode,
+                appVersion: process.env.APP_VERSION,
+                env: process.env.NODE_ENV,
+                messageId: savedMessage?.id,
+            });
+
+            // 2) Custom event (useful for NRQL alerts)
+            newrelic.recordCustomEvent('ApiFailure', {
+                type: 'WhatsAppTemplateSend',
+                templateName,
+                caseId,
+                userId,
+                status,
+                reason,
+                toMasked: this.maskPhone(to),
+            });
+
+            // 3) Simple counter metric
+            newrelic.incrementMetric('Custom/WhatsAppTemplate/Failures', 1);
+            // ———————————————————————————————————————————————
+
+            // Mark FAILED in DB
             await this.prisma.message.update({
                 where: { id: savedMessage.id },
                 data: { systemStatus: SystemMessageStatus.FAILED },
             });
 
-            if (savedMessage) await this.notifyClients({ ...savedMessage, systemStatus: SystemMessageStatus.FAILED });
-            throw err;
+            // ⛔️ removed as requested: no client broadcast on failure
+            // if (savedMessage) await this.notifyClients({ ...savedMessage, systemStatus: SystemMessageStatus.FAILED });
+
+            // App log for your eyes
+            this.logger.error(
+                `Template send failed: template="${templateName}" case=${caseId} user=${userId} status=${status} reason=${reason}`
+            );
+
+            // rethrow to upstream handler (global filter / controller)
+            throw e;
         }
     }
 

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Status, CaseHandler, SenderType, Prisma } from '@prisma/client';
+import { Status, CaseHandler, SenderType } from '@prisma/client';
 import { format, startOfDay, endOfDay, subDays, startOfHour, endOfHour, addHours } from 'date-fns';
 import { PrismaService } from 'src/prisma/prisma.service';
 
@@ -19,13 +19,6 @@ export interface OverviewAnalytics {
     text: string;
     count: number;
 }
-export interface AgentChatStat {
-    agentId: number | null;
-    agentName: string | null;
-    totalChats: number;     // distinct cases the agent touched
-    totalMessages: number;  // total agent messages in the window
-}
-
 
 @Injectable()
 export class AnalyticsService {
@@ -788,72 +781,6 @@ export class AnalyticsService {
 
         await this.updateOverallAnalytics();
         this.logger.log('Analytics backfill completed');
-    }
-
-
-    async getTotalChatsPerAgent(
-        start?: Date,
-        end?: Date,
-        all = false
-    ): Promise<AgentChatStat[]> {
-        const useTimeWindow = !all && start && end;
-
-        const rows = useTimeWindow
-            ? await this.prisma.$queryRaw<
-                { userId: number | null; agentName: string | null; totalChats: bigint; totalMessages: bigint }[]
-            >(Prisma.sql`
-        SELECT
-          m."userId" AS "userId",
-          (u."firstName" || ' ' || u."lastName") AS "agentName",
-          COUNT(DISTINCT m."caseId") AS "totalChats",
-          COUNT(*) AS "totalMessages"
-        FROM "Message" m
-        JOIN "User" u ON u."id" = m."userId"
-        WHERE
-          m."senderType" = 'USER'::"SenderType"
-          AND m."userId" IS NOT NULL
-          AND m."timestamp" >= ${start!}
-          AND m."timestamp" <= ${end!}
-        GROUP BY m."userId", u."firstName", u."lastName"
-        ORDER BY COUNT(DISTINCT m."caseId") DESC, COUNT(*) DESC;
-      `)
-            : await this.prisma.$queryRaw<
-                { userId: number | null; agentName: string | null; totalChats: bigint; totalMessages: bigint }[]
-            >(Prisma.sql`
-        SELECT
-          m."userId" AS "userId",
-          (u."firstName" || ' ' || u."lastName") AS "agentName",
-          COUNT(DISTINCT m."caseId") AS "totalChats",
-          COUNT(*) AS "totalMessages"
-        FROM "Message" m
-        JOIN "User" u ON u."id" = m."userId"
-        WHERE
-          m."senderType" = 'USER'::"SenderType"
-          AND m."userId" IS NOT NULL
-        GROUP BY m."userId", u."firstName", u."lastName"
-        ORDER BY COUNT(DISTINCT m."caseId") DESC, COUNT(*) DESC;
-      `);
-
-        return rows.map(r => ({
-            agentId: r.userId,
-            agentName: r.agentName,
-            totalChats: Number(r.totalChats ?? 0),
-            totalMessages: Number(r.totalMessages ?? 0),
-        }));
-    }
-
-    /** Convenience: today only */
-    async getTotalChatsPerAgentToday(): Promise<AgentChatStat[]> {
-        const start = startOfDay(new Date());
-        const end = new Date();
-        return this.getTotalChatsPerAgent(start, end);
-    }
-
-    /** Convenience: last N days (default 7) */
-    async getTotalChatsPerAgentLastNDays(days = 7): Promise<AgentChatStat[]> {
-        const start = subDays(new Date(), days);
-        const end = new Date();
-        return this.getTotalChatsPerAgent(start, end);
     }
 
 

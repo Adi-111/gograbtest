@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import { TransactionInfoDto } from "./dto/transaction-info.dto";
 import { RefundInfoDto } from "./dto/refund-info.dto";
 import { VendInfoDto } from "./dto/VendInfoDto";
@@ -8,6 +8,7 @@ import { ProductDto } from "./dto/products.dto";
 import { PrismaService } from "src/prisma/prisma.service";
 import { MergedProductDetail, ProductDetailProp } from "../types";
 import { JwtPayload, decode } from 'jsonwebtoken';
+import * as newrelic from 'newrelic';
 
 
 
@@ -82,6 +83,7 @@ export class GGBackendService {
     }
 
     async bankTxn(utrId: string): Promise<TransactionInfoDto> {
+        const url = `${this.ggApi}/payments/bank_txn_id`;
         if (!this.bearerToken || this.bearerToken === null || this.isTokenExpired(this.bearerToken)) {
             await this.loginVerify();
         }
@@ -103,10 +105,36 @@ export class GGBackendService {
 
             return txnInfo;
 
-        } catch (err) {
-            this.logger.error(`error while working with ${this.ggApi}/payments/bank_txn_id error = ${err}`)
-            return null;
+        } catch (e) {
+            const err = e as AxiosError<any>;
+            const status = err.response?.status ?? 0;
 
+            // ——— error-only telemetry ———
+            newrelic.noticeError(err, {
+                utrId,
+                url,
+                method: 'GET',
+                status,
+                env: process.env.NODE_ENV,
+                appVersion: process.env.APP_VERSION,
+            });
+
+            newrelic.recordCustomEvent('ApiFailure', {
+                type: 'BankTxnLookup',
+                utrId,
+                url,
+                method: 'GET',
+                status,
+                reason: `error while working with ${url} error=${err?.message}; status=${status}; data=${JSON.stringify(err.response?.data ?? {})}`,
+            });
+
+            newrelic.incrementMetric('Custom/BankTxn/Failures', 1);
+            // ————————————————
+
+            this.logger.error(
+                `error while working with ${url} error=${err?.message}; status=${status}; data=${JSON.stringify(err.response?.data ?? {})}`
+            );
+            return null;
         }
 
     }

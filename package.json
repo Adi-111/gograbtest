@@ -45,7 +45,7 @@
     "html-to-text": "^9.0.5",
     "jsonwebtoken": "^9.0.2",
     "loadash": "^1.0.0",
-    "newrelic": "^12.18.2",
+    "newrelic": "^12.25.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",

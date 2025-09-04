@@ -156,7 +156,7 @@ export class ChatGateway
       if (payload?.status === 'EXPIRED') {
         baseWhere.AND = [
           { timer: { lt: new Date() } },
-          { status: { not: Status.SOLVED } }, ``
+          { status: { not: Status.SOLVED } },
         ];
       } else if (payload?.status) {
         baseWhere.status = payload.status;
@@ -577,7 +577,7 @@ export class ChatGateway
 
       const chatInfo =
         updatedCase.assignedTo === CaseHandler.USER
-          ? { ...baseChatInfo, handler: `user: ${updatedCase.user.firstName}` }
+          ? { ...baseChatInfo, handler: `${updatedCase.user.firstName}` }
           : {
             ...baseChatInfo,
             handler: String(updatedCase.assignedTo),

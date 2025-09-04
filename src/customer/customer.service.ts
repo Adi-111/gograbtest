@@ -19,6 +19,8 @@ interface WhatsAppMessagePayload {
     type: string;
     [key: string]: any;
 }
+
+
 const greetings = [
     "hi", "hii", "hiii", "hey", "heyy", "heyyy",
     "hlo", "order", "refund", "some",
@@ -230,10 +232,18 @@ export class CustomerService {
         const message = value?.messages?.[0];
 
 
-
-
-
-
+        if (message?.type === 'reaction') {
+            // WhatsApp Cloud API reaction payload typically contains: reaction: { emoji, message_id, action }
+            const emoji = message?.reaction?.emoji ?? '';
+            // Mutate a shallow copy to avoid side effects if you prefer:
+            const normalized = {
+                ...message,
+                type: 'text',
+                text: { body: emoji || '👍' }, // fallback if somehow empty
+            };
+            // Replace reference for the remaining logic
+            changes.value.messages[0] = normalized;
+        }
 
         if (value?.statuses) {
             if (value?.statuses[0]?.status === 'failed') {
@@ -308,8 +318,9 @@ export class CustomerService {
                 this.logger.warn(`Bot is stopped for case ${caseRecord.id}, ignoring message.`);
                 const updatedCase = await this.prisma.case.update({
                     where: { id: caseRecord.id }, data: {
+                        lastBotNodeId: null,
                         assignedTo: CaseHandler.USER,
-                        lastBotNodeId: null
+                        unread: 1
                     }
                 })
                 return { customer, case: updatedCase };
@@ -811,7 +822,11 @@ export class CustomerService {
             content = message.interactive.list_reply.title;
         } else if (message.type === 'text') {
             content = message.text?.body;
+        } else if (message.type === 'reaction') {
+            // If normalization in (1) ever gets skipped, still handle raw reaction safely
+            content = message?.reaction?.emoji ?? 'emoji';
         }
+
 
         const messageData = {
             type: this.mapMessageType(message.type),
@@ -896,6 +911,7 @@ export class CustomerService {
             interactive: MessageType.INTERACTIVE,
             list_reply: MessageType.LIST_REPLY,
             button_reply: MessageType.BUTTON_REPLY,
+            reaction: MessageType.TEXT,
         };
 
         return typeMap[type] || MessageType.TEXT;
