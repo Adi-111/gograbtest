@@ -9,6 +9,7 @@ import { GGBackendService } from './gg-backend/gg-backend.service';
 import { TransactionInfoDto } from './gg-backend/dto/transaction-info.dto';
 import { MergedProductDetail } from './types';
 import { WAComponent } from './dto/send-template.dto';
+import { VendInfoDto } from './gg-backend/dto/VendInfoDto';
 
 
 
@@ -357,7 +358,7 @@ export class CustomerService {
 
                     if (
                         message.type === 'image' &&
-                        caseRecord.lastBotNodeId !== 'main_question-fXmet'
+                        caseRecord.lastBotNodeId !== 'main_question-fXmet' && caseRecord.lastBotNodeId !== 'on-wa'
                     ) {
                         this.logger.warn(`Image received when expecting interactive response. Sending fallback.`);
                         await this.botService.sendFallbackMessage(phoneNo, caseRecord.id)
@@ -388,7 +389,10 @@ export class CustomerService {
                         // 🔁 HARDCODED FLOW EXAMPLE
 
                         if (lastBotNodeId === 'main_question-FyKfq') {
-                            await this.chatService.triggerStatusUpdate(caseRecord.id, Status.PROCESSING, 5, CaseHandler.USER);
+                            await this.chatService.triggerStatusUpdate(caseRecord.id, Status.INITIATED, 5, CaseHandler.USER);
+                        }
+                        if (lastBotNodeId === 'main_question-FyKff') {
+                            await this.chatService.triggerStatusUpdate(caseRecord.id, Status.INITIATED, 5, CaseHandler.USER);
                         }
 
                         if (lastBotNodeId === 'main_question-sZPbm') {
@@ -398,6 +402,17 @@ export class CustomerService {
                             //     data: { lastBotNodeId: nextNode.nodeId },
                             // });
 
+                        }
+                        if (lastBotNodeId === 'on-wa') {
+                            this.logger.log(`Invoice Screenshot request is Active...`);
+                            if (message.type === 'image' && storedMessage?.media?.url) {
+                                await this.prisma.case.update({
+                                    where: { id: caseRecord.id },
+                                    data: {
+                                        lastBotNodeId: null,
+                                    }
+                                });
+                            }
                         }
                         if (lastBotNodeId === 'main_question-fXmet') {
                             this.logger.log(`Refund Screenshot request is ACTIVE...`);
@@ -527,6 +542,10 @@ export class CustomerService {
             let txnInfo: TransactionInfoDto;
 
             txnInfo = await this.gg_backend_service.bankTxn(utrId);
+            if (txnInfo.message === 'F404') {
+                await this.botService.botSendByNodeId('screenshot9', phoneNo, caseId);
+                return;
+            }
             if (txnInfo === null) {
                 await this.botService.botSendByNodeId('screenshot4', phoneNo, caseId);
                 return;
@@ -797,7 +816,7 @@ export class CustomerService {
     ) {
         let media;
 
-        if (message.type === 'image' || message.type === 'video') {
+        if (message.type === 'image' || message.type === 'video' || message.type === 'document') {
             const mediaData = message[message.type];
             if (mediaData.id) {
                 const mediaId = mediaData.id;
@@ -854,19 +873,25 @@ export class CustomerService {
         const type = message.type;
         const media = message[type];
         const mediaId = media.id;
-
-
-
+        this.logger.log(`Received Media Message of type:${media}`)
         try {
+            if (type === 'document') {
+
+            }
             const mediaUrl = await this.getMediaUrl(mediaId);
             const mediaFile = await this.downloadMedia(mediaUrl);
             this.logger.log(mediaFile);
+            let cloudUrl = 'no-url-formed'
 
-            const cloudUrl = await this.cloudService.uploadFile(
-                mediaFile,
-                media.filename || `media-${Date.now()}`,
-                media.mime_type
-            );
+            if (media === 'document') {
+                cloudUrl = await this.cloudService.savePdfFromWebhook(mediaFile, media.fileName);
+            } else {
+                cloudUrl = await this.cloudService.uploadFile(
+                    mediaFile,
+                    media.filename || `media-${Date.now()}`,
+                    media.mime_type
+                );
+            }
 
             const mediaData = {
                 create: {
@@ -916,6 +941,38 @@ export class CustomerService {
 
         return typeMap[type] || MessageType.TEXT;
     }
+
+    async sendDocumentToCustomer(
+        to: string,
+        documentUrl: string,
+        fileName: string,
+        caption?: string
+    ): Promise<void> {
+        try {
+            if (!to || !documentUrl || !fileName) {
+                throw new Error('Recipient phone number, document URL, and file name are required');
+            }
+
+            const payload: WhatsAppMessagePayload = {
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to,
+                type: 'document',
+                document: {
+                    link: documentUrl,   // URL from your bucket / cloud storage
+                    filename: fileName,  // File name to show in WhatsApp
+                    ...(caption ? { caption } : {}), // Optional caption
+                },
+            };
+
+            const response = await this.sendWhatsAppRequest(payload);
+            this.logger.log(`Document payload response: ${JSON.stringify(response)}`);
+        } catch (error) {
+            this.logger.error(`Failed to send document to ${to}: ${(error as Error).message}`, (error as Error).stack);
+            throw new Error('Failed to send document message');
+        }
+    }
+
 
     async sendTextMessage(to: string, text: string) {
         return this.sendWhatsAppRequest({
@@ -1071,5 +1128,7 @@ export class CustomerService {
             console.error("Error updating agent deadline:", error);
         }
     }
+
+
 
 }

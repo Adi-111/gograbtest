@@ -316,7 +316,7 @@ export class ChatService {
                     });
 
                     // Log the media object for debugging
-                    this.logger.log('Media Object:', media);
+                    this.logger.log('Image Object:', media);
 
                     if (media && media.url) {
                         // Check and sanitize the URL
@@ -325,6 +325,24 @@ export class ChatService {
                         // If the URL is valid, send it to the customer
                         if (sanitizedUrl) {
                             this.customerService.sendImageToCustomer(phoneNo, sanitizedUrl, 'image');
+                        } else {
+                            this.logger.error(`Invalid media URL: ${media.url}`);
+                        }
+                    } else {
+                        this.logger.error("Media URL not found or invalid.");
+                    }
+                }
+                else if (message.type === MessageType.DOCUMENT) {
+                    const media = await this.prisma.media.findUnique({
+                        where: {
+                            id: message.media?.id
+                        }
+                    });
+                    this.logger.log('Doc Object', media);
+                    if (media && media.url) {
+                        const sanitizedUrl = decodeURIComponent(media.url);
+                        if (sanitizedUrl) {
+                            this.customerService.sendDocumentToCustomer(phoneNo, sanitizedUrl, media.fileName);
                         } else {
                             this.logger.error(`Invalid media URL: ${media.url}`);
                         }

@@ -395,6 +395,19 @@ export class ChatGateway
 
         mediaId = media.id;
       }
+      else if (messageType === MessageType.DOCUMENT) {
+        this.logger.log(`Cloud URL: ${attachments?.url}`);
+        const dest = this.cloudService.extractDestination(attachments?.url)
+        const media: Media = await this.prisma.media.create({
+          data: {
+            url: attachments?.url,
+            mimeType: 'application/pdf',
+            fileName: dest
+          }
+        })
+        this.logger.log(media);
+        mediaId = media.id;
+      }
 
       // Construct the message object.
       const messagePayload = {
@@ -557,7 +570,7 @@ export class ChatGateway
       await this.recordStatusChange(caseId, userId, caseRecord.status, status);
       const updatedEvents = await this.prisma.statusEvent.findMany({
         where: { caseId },
-        include: { user: true },
+        include: { user: true, },
         orderBy: { timestamp: 'asc' },
       });
       client.emit('status-events', updatedEvents); // send to sender

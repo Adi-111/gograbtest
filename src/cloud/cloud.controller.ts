@@ -23,6 +23,15 @@ export class CloudController {
     return { url: uploadedUrl };
   }
 
+  @Post('doc-upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadDoc(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new Error('No file uploaded');
+    const uploadedUrl = await this.cloudService.savePdfFromWebhook(file.buffer, file.originalname);
+    return { url: uploadedUrl }
+  }
+
+
   @Post('extract-upi')
   async extractUPI(@Body() body: { gcsFilePath: string }) {
     const { gcsFilePath } = body;

@@ -24,6 +24,9 @@ export class CloudService {
         })
         this.bucketName = process.env.GCP_BUCKET_NAME;
     }
+
+
+    //OCR Functions
     async extractTransactionIdFromGCS(filePath: string) {
         try {
             const gcsUri = `gs://${this.bucketName}/${filePath}`;
@@ -80,6 +83,10 @@ export class CloudService {
 
 
 
+
+
+
+    // Upload Image To Bucket
     async uploadFile(fileBuffer: Buffer, originalName: string, contentType: string): Promise<string> {
         this.logger.log(`Uploading Image File Buffer...`)
         try {
@@ -122,6 +129,31 @@ export class CloudService {
             this.logger.error('Error uploading file to GCS', error);
             throw new Error('File upload failed');
         }
+    }
+
+    //Upload Pdf to Bucket
+    async savePdfFromWebhook(buffer: Buffer, originalName: string): Promise<string> {
+        // (tiny guard; remove if you truly want zero checks)
+        if (buffer.subarray(0, 4).toString("utf8") !== "%PDF") {
+            throw new Error("Incoming file is not a PDF.");
+        }
+
+        const bucket = this.storage.bucket(this.bucketName);
+        const destination = `customer-pdf/${Date.now()}-${originalName.replace(/\s+/g, "_")}`;
+        const file = bucket.file(destination);
+
+        await new Promise<void>((resolve, reject) => {
+            const stream = file.createWriteStream({
+                metadata: { contentType: "application/pdf" },
+                resumable: false,
+                validation: false,
+            });
+            stream.on("error", reject).on("finish", resolve).end(buffer);
+        });
+
+        await file.makePublic();
+        this.logger.log(`https://storage.googleapis.com/${this.bucketName}/${destination}`);
+        return `https://storage.googleapis.com/${this.bucketName}/${destination}`;
     }
 
 

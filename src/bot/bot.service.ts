@@ -100,6 +100,11 @@ export class BotService {
                     });
                 }
                 this.logger.log(node.nodeId);
+                if (node.nodeId === 'main_buttons-invoice') {
+                    this.botSendByNodeId('las2', phoneNo, caseId);
+                }
+                this.logger.log(node.nodeId);
+
 
                 switch (node.flowNodeType) {
                     case ReplyType.Message:
@@ -410,7 +415,9 @@ export class BotService {
             }
         })
         const framedMsg = `Hi, ${cus.name} 😊\nWelcome to Go-Grab Support!\nWe’re here to help and make sure you’re always snack-happy 🍿\nPlease choose an option from the menu below 👇`;
-        const framedBody = { "sections": [{ "rows": [{ "id": "main_buttons-bCVmo", "title": "Order Fail/Refund Issues", "description": "" }, { "id": "main_buttons-hSJwk", "title": "Machine Issues", "description": "" }, { "id": "main_question-sZPbm", "title": "Product Quality Issues", "description": "" }, { "id": "main_message-DqzXV", "title": "RFID Card Recharge", "description": "" }, { "id": "main_question-nyJZr", "title": "Suggestions or Feedback", "description": "" }, { "id": "main_question-FyKfq", "title": "Others", "description": "" }], "title": "Please select" }] }
+        const framedBody = {
+            "sections": [{ "rows": [{ "id": "main_buttons-bCVmo", "title": "Order Fail/Refund Issues", "description": "" }, { "id": "main_buttons-hSJwk", "title": "Machine Issues", "description": "" }, { "id": "main_question-sZPbm", "title": "Product Quality Issues", "description": "" }, { "id": "main_message-DqzXV", "title": "RFID Card Recharge", "description": "" }, { "id": "main_question-nyJZr", "title": "Suggestions or Feedback", "description": "" }, { "id": "main_buttons-ELECtro", "title": "Electronic Products", "description": "" }, { "id": "main_question-FyKfq", "title": "Others", "description": "" }], "title": "Please select" }]
+        }
         const message = {
             text: framedMsg,
             type: MessageType.INTERACTIVE,

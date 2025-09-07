@@ -134,7 +134,13 @@ export class GGBackendService {
             this.logger.error(
                 `error while working with ${url} error=${err?.message}; status=${status}; data=${JSON.stringify(err.response?.data ?? {})}`
             );
-            return null;
+            const obj: TransactionInfoDto = {
+                order_id: null,
+                refund_id: null,
+                message: 'F404',
+                errorCode: Number(err?.code),
+            }
+            return obj;
         }
 
     }
