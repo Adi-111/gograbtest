@@ -2,6 +2,7 @@ import { Controller, Get, Param, ParseIntPipe } from "@nestjs/common";
 import { ChatService } from "./chat.service";
 import { ChatEntity } from "./entity/chat.entity";
 import { ApiCreatedResponse, ApiResponseProperty } from "@nestjs/swagger";
+import { MachineDetailsDto } from "./dto/MachineDetails.dto";
 
 @Controller('chat')
 export class ChatController {
@@ -25,5 +26,11 @@ export class ChatController {
     @Get('all-quick-msg')
     async getAllQuickMsg() {
         return await this.chatService.fetchQuickReplies();
+    }
+
+    @Get('machineDetails')
+    async getMachineDetails() {
+        const data: MachineDetailsDto[] = await this.chatService.getMachineDetails();
+        return data
     }
 }

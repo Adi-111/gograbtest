@@ -1,9 +1,40 @@
 generator client {
   provider = "prisma-client-js"
 }
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model Machine {
+  machine_id                       String   @id
+  machine_name                     String
+  location                         String
+  description                      String
+  rating                           String
+  machine_status                   Boolean
+  machine_type                     String
+  machine_capacity                 Int
+  total_coils                      Int
+  password                         String
+  date_created                     DateTime 
+  left_units                       Int
+  last_refill_time                 DateTime?
+  last_refill_by                   String?
+  last_refill_availability         String?
+  availability                     String?
+  last_transaction                 DateTime?
+  accumulated_downtime             String?
+  time_difference_from_last_transaction String?
+  last_report_time                 DateTime?
+  refill_report_time_difference    String?
+  variety_score                    String?
+  latitude                         Float?
+  longitude                        Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime 
+
 }
 
 
@@ -109,11 +140,85 @@ model Case {
   meta           Json?
   statusEvent    StatusEvent[]
   failedMsgEvent FailedMsgEvent[]
-  isNewCase      Boolean          @default(true)
+  currentIssueId Int?
+  issueEvents    IssueEvent[]
+
+  isNewCase Boolean @default(true)
 
   @@index([status])
   @@index([customerId])
 }
+
+enum IssueEventStatus {
+  OPEN
+  CLOSED
+}
+
+//
+// NEW: issue taxonomy
+//
+enum IssueType {
+  REFUND
+  MACHINE_OFFLINE
+  MACHINE_NOT_WORKING
+  FEEDBACK
+  MACHINE_NOT_REFILLED
+  OTHER
+}
+
+//
+// NEW: refund mode
+//
+enum RefundMode {
+  AUTO
+  MANUAL
+}
+
+model IssueEvent {
+  id           Int               @id @default(autoincrement())
+  caseId       Int
+  customerId   Int
+  userId       Int?
+
+  // lifecycle
+  status       IssueEventStatus  @default(OPEN)
+  isActive     Boolean           @default(true)
+  openedAt     DateTime          @default(now())
+  closedAt     DateTime?
+
+  // domain fields
+  machineName       String?
+  issueType         IssueType     @default(OTHER) // NEW
+  refundMode        RefundMode?                  // NEW; only when issueType = REFUND
+
+  
+
+  
+  refundAmountMinor Int?                           // NEW; required only when refundMode = MANUAL
+  
+
+  resolutionNotes   String?                         // NEW (formerly issueDetails)
+  
+
+  agentCalledAt DateTime?
+  agentLinkedAt DateTime?
+  endTimeAt     DateTime?
+
+  messages      Message[]
+  case          Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([status, isActive])
+  @@index([issueType])
+}
+
+
+
+
+
 
 model StatusEvent {
   id             Int      @id @default(autoincrement())
@@ -192,6 +297,8 @@ model Message {
   caseId             Int?
   WhatsAppCustomer   WhatsAppCustomer? @relation(fields: [whatsAppCustomerId], references: [id])
   whatsAppCustomerId Int?
+  issueEvent         IssueEvent?       @relation(fields: [issueEventId], references: [id])
+  issueEventId       Int?
 
   @@index([senderType])
   @@index([recipient])
@@ -226,28 +333,25 @@ model Location {
   accuracy  Float? // Location accuracy in meters
 }
 
-
-
-
 model Product {
-  product_id            String   @unique @id
-  product_name          String
-  description           String? 
-  image                 String
-  category              String
-  product_price         Int
-  brand_name            String
-  created_at            DateTime @default(now())
-  hsn_code              String? 
-  bar_code              String?
-  is_active             Boolean  @default(true)
-  moq                   Int
-  zoho_item_id          String
-  purchase_rate         Float
-  inter_state_tax_rate  Float
-  intra_state_tax_rate  Float
-  product_type          String? 
-  markdown_percentage   Float
+  product_id           String   @id @unique
+  product_name         String
+  description          String?
+  image                String
+  category             String
+  product_price        Int
+  brand_name           String
+  created_at           DateTime @default(now())
+  hsn_code             String?
+  bar_code             String?
+  is_active            Boolean  @default(true)
+  moq                  Int
+  zoho_item_id         String
+  purchase_rate        Float
+  inter_state_tax_rate Float
+  intra_state_tax_rate Float
+  product_type         String?
+  markdown_percentage  Float
 }
 
 model Contact {
@@ -326,95 +430,95 @@ enum CaseHandler {
 }
 
 model CustomerOrderDetails {
-  id        Int       @id @default(autoincrement())
-  customerId     Int
-  coils     String[]
-  productIds String[]
+  id               Int      @id @default(autoincrement())
+  customerId       Int
+  coils            String[]
+  productIds       String[]
   dispenseStatuses String[]
-  machine_id String?
-  verdict String?
-  orderTime DateTime
-  created_at DateTime  @default(now())
+  machine_id       String?
+  verdict          String?
+  orderTime        DateTime
+  created_at       DateTime @default(now())
 }
 
 model DailyAnalytics {
-  id                    Int      @id @default(autoincrement())
-  date                  DateTime @unique @db.Date
-  
+  id   Int      @id @default(autoincrement())
+  date DateTime @unique @db.Date
+
   // Basic counts
-  casesOpened           Int      @default(0)
-  casesPending          Int      @default(0)
-  casesSolved           Int      @default(0)
-  casesSolvedByOperator Int      @default(0)
-  casesSolvedByBot      Int      @default(0)
-  casesExpired          Int      @default(0)
-  casesProcessing       Int      @default(0)
-  missedChats           Int      @default(0)
-  
+  casesOpened           Int @default(0)
+  casesPending          Int @default(0)
+  casesSolved           Int @default(0)
+  casesSolvedByOperator Int @default(0)
+  casesSolvedByBot      Int @default(0)
+  casesExpired          Int @default(0)
+  casesProcessing       Int @default(0)
+  missedChats           Int @default(0)
+
   // Duration metrics (in minutes)
-  avgCaseDuration       Float?   @default(0)
-  totalCaseDuration     Float?   @default(0)
-  
+  avgCaseDuration   Float? @default(0)
+  totalCaseDuration Float? @default(0)
+
   // Metadata
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([date])
 }
 
 model TagAnalytics {
-  id        Int      @id @default(autoincrement())
-  date      DateTime @db.Date
-  tagText   String
-  count     Int      @default(0)
-  
+  id      Int      @id @default(autoincrement())
+  date    DateTime @db.Date
+  tagText String
+  count   Int      @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@unique([date, tagText])
   @@index([date])
   @@index([tagText])
 }
 
 model OverallAnalytics {
-  id                    Int      @id @default(autoincrement())
-  
+  id Int @id @default(autoincrement())
+
   // Current state counters
-  totalCases            Int      @default(0)
-  casesProcessing       Int      @default(0)
-  casesSolved           Int      @default(0)
-  casesSolvedByBot      Int      @default(0)
-  casesSolvedByOperator Int      @default(0)
-  casesExpired          Int      @default(0)
-  casesOpen             Int      @default(0)
-  
+  totalCases            Int @default(0)
+  casesProcessing       Int @default(0)
+  casesSolved           Int @default(0)
+  casesSolvedByBot      Int @default(0)
+  casesSolvedByOperator Int @default(0)
+  casesExpired          Int @default(0)
+  casesOpen             Int @default(0)
+
   // Last updated
-  lastUpdated           DateTime @default(now())
-  
+  lastUpdated DateTime @default(now())
+
   @@map("overall_analytics")
 }
 
 model HourlyAnalytics {
-  id                    Int      @id @default(autoincrement())
-  datetime              DateTime @unique // Stores date + hour (e.g., 2025-01-15 14:00:00)
-  
+  id       Int      @id @default(autoincrement())
+  datetime DateTime @unique // Stores date + hour (e.g., 2025-01-15 14:00:00)
+
   // Basic counts for this hour
-  casesOpened           Int      @default(0)
-  casesPending          Int      @default(0)
-  casesSolved           Int      @default(0)
-  casesSolvedByOperator Int      @default(0)
-  casesSolvedByBot      Int      @default(0)
-  casesExpired          Int      @default(0)
-  casesProcessing       Int      @default(0)
-  missedChats           Int      @default(0)
-  
+  casesOpened           Int @default(0)
+  casesPending          Int @default(0)
+  casesSolved           Int @default(0)
+  casesSolvedByOperator Int @default(0)
+  casesSolvedByBot      Int @default(0)
+  casesExpired          Int @default(0)
+  casesProcessing       Int @default(0)
+  missedChats           Int @default(0)
+
   // Duration metrics (in minutes)
-  avgCaseDuration       Float?   @default(0)
-  totalCaseDuration     Float?   @default(0)
-  
+  avgCaseDuration   Float? @default(0)
+  totalCaseDuration Float? @default(0)
+
   // Metadata
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([datetime])
 }

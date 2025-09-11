@@ -10,6 +10,7 @@ import { QuickMessage } from './dto/quick-message.dto';
 import { FailedMessageDto } from './dto/failed-message.dto';
 import * as newrelic from 'newrelic';
 import { AxiosError } from 'axios';
+import { MachineDetailsDto } from './dto/MachineDetails.dto';
 
 
 @Injectable()
@@ -102,11 +103,14 @@ export class ChatService {
                     timestamp: new Date(),
                 };
 
+                
+
                 // Create message with nested connections
                 const message: ChatEntity = await tx.message.create({
                     data: {
                         ...baseData,
                         case: { connect: { id: createMessageDto.caseId } },
+                        issueEvent: { connect: { id: caseRecord.currentIssueId } },
                         ...(createMessageDto.userId && { user: { connect: { id: createMessageDto.userId } } }),
                         ...(createMessageDto.botId && { bot: { connect: { id: createMessageDto.botId } } }),
                         ...(createMessageDto.whatsAppCustomerId && {
@@ -134,6 +138,7 @@ export class ChatService {
                                 }
                             }
                         }),
+
                     },
 
                     include: this.fullMessageIncludes()
@@ -501,6 +506,8 @@ export class ChatService {
             throw new Error('InteractiveList node missing sections');
         }
 
+        const currentIssueId = await this.prisma.case
+
         const message = {
             text: (node.body as any)?.text || 'Please select from the list:',
             type: MessageType.INTERACTIVE,
@@ -671,6 +678,12 @@ export class ChatService {
             // rethrow to upstream handler (global filter / controller)
             throw e;
         }
+    }
+
+
+    async getMachineDetails() {
+        const data: MachineDetailsDto[] = await this.customerService.machineDetails();
+        return data
     }
 
 

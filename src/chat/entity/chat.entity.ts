@@ -9,6 +9,7 @@ export class ChatEntity implements Message {
     constructor(partial: Partial<ChatEntity>) {
         Object.assign(this, partial);
     }
+    issueEventId: number;
 
 
     @ApiProperty()

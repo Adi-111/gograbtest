@@ -117,6 +117,21 @@ export class CustomerController {
   }
 
 
+  @Get('get-all-machines')
+  async getAllMachines() {
+    return this.ggAppBackend.getAllMachines();
+  }
+
+  @Get('issue-per-machine')
+  async getIssuePerMachine() {
+    return await this.ggAppBackend.issueTaggedPerMachine()
+  }
+
+  @Get('without-agent')
+  async withoutAgent(
+  ) {
+    return await this.ggAppBackend.percentResolvedWithoutAgent()
+  }
 
   // @Get('getAllCustomer')
   // @ApiCreatedResponse({ type: [CustomerEntity] })

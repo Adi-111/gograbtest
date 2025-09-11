@@ -12,7 +12,7 @@ export class CaseEntity implements Case {
     ) {
         Object.assign(this, partial);
     }
-
+    currentIssueId: number | null;
     @IsNumber()
     id: number;
     unread: number;

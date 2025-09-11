@@ -12,6 +12,7 @@ export class CreateMessageDto {
 
 
 
+
     // Optional fields
     text?: string;
     messageType?: MessageType;
@@ -24,6 +25,11 @@ export class CreateMessageDto {
     botId?: number;
     whatsAppCustomerId?: number;
     mediaId?: number;
+    issueEventId?: number
+
+
+    //issueEvent
+    
 
     // Attachments
     media?: {

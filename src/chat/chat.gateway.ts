@@ -10,12 +10,15 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  MessageBody,
+  WsException,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   Case,
   CaseHandler,
+  IssueEventStatus,
   Media,
   Message,
   MessageType,
@@ -29,6 +32,8 @@ import { UiEntity } from './entity/ui.entity';
 import { CloudService } from 'src/cloud/cloud.service';
 import { UnreadHandlerEntity } from './entity/unread-handler.entity';
 import { FailedMessageDto } from './dto/failed-message.dto';
+import { UpdateCaseDto } from 'src/cases/dto/update-case.dto';
+import { updateIssueDto } from './dto/UpdateIssue.DTO';
 
 @WebSocketGateway({
   cors: {
@@ -373,7 +378,17 @@ export class ChatGateway
           user: { connect: { id: payload.userId } }
         },
         select: {
-          user: true
+          user: true,
+          currentIssueId: true
+        }
+      })
+      await this.prisma.issueEvent.update({
+        where: {
+          id: newCase.currentIssueId
+        },
+        data: {
+          agentLinkedAt: new Date(),
+          userId: newCase.user.id
         }
       })
       if (!newCase.user) {
@@ -528,6 +543,91 @@ export class ChatGateway
     }
   }
 
+  @SubscribeMessage("updateIssue")
+  async handleEvent(@MessageBody() payload: updateIssueDto) {
+    const {
+      caseId,
+      status,        // Case-level status
+      machineDetails,
+      issueType,
+      refundMode,
+      refundAmount,
+      notes,
+    } = payload;
+
+    // 1) Get active issue for this case
+    const kase = await this.prisma.case.findUnique({
+      where: { id: caseId },
+      select: { currentIssueId: true },
+    });
+
+    if (!kase) {
+      throw new WsException("Active issue not found for this case.");
+    }
+    const issueId = kase.currentIssueId;
+
+    // 2) Validate refund fields
+    if (issueType === "REFUND") {
+      if (!refundMode) {
+        throw new WsException("refundMode is required for REFUND issues.");
+      }
+      if (refundMode === "MANUAL") {
+        const amt = Number(refundAmount);
+        if (!refundAmount || Number.isNaN(amt) || amt <= 0) {
+          throw new WsException(
+            "A valid positive refundAmount is required for MANUAL refunds."
+          );
+        }
+      }
+    }
+
+    // Store amounts as minor units (e.g., paise)
+    const refundAmountMinor =
+      issueType === "REFUND" && refundMode === "MANUAL"
+        ? Math.round(Number(refundAmount) * 100)
+        : null;
+
+    // 3) Persist atomically
+    const [updatedIssue, updatedCase] = await this.prisma.$transaction([
+      this.prisma.issueEvent.update({
+        where: { id: issueId },
+        data: {
+          status: IssueEventStatus.CLOSED, // close the issue
+          isActive: false,
+          closedAt: new Date(),
+          endTimeAt: new Date(),
+
+          // domain fields
+          machineName: machineDetails?.machine?.machine_name ?? null,
+          issueType,
+          refundMode: issueType === "REFUND" ? refundMode : null,
+          refundAmountMinor: refundAmountMinor,
+          resolutionNotes: notes ?? null,
+        },
+      }),
+
+      // Update the parent Case status (if that's your desired flow)
+      this.prisma.case.update({
+        where: { id: caseId },
+        data: {
+          status, // expects Case.status to be the same `Status` enum you passed
+          // Optionally unlink the currentIssueId since it's closed:
+          currentIssueId: null,
+          updatedAt: new Date(),
+        },
+        select: { id: true, status: true },
+      }),
+    ]);
+
+    // 4) Optionally notify room/subscribers
+    // this.server.to(`case:${caseId}`).emit("issue-updated", {
+    //   issue: updatedIssue,
+    //   case: updatedCase,
+    // });
+
+    return { ok: true, issue: updatedIssue, case: updatedCase };
+  }
+
 
 
   @SubscribeMessage('update-contact-status')
@@ -538,11 +638,55 @@ export class ChatGateway
     try {
       const { caseId, status, userId } = payload;
 
+
       const caseRecord = await this.prisma.case.findUnique({
         where: { id: payload.caseId },
-        select: { status: true },
+        select: { status: true, currentIssueId: true, customerId: true },
       });
       if (!caseRecord) throw new Error('Case not found');
+      if (payload.assignedTo === 'USER') {
+        await this.prisma.issueEvent.update({
+          where: {
+            id: caseRecord.currentIssueId
+          },
+          data: {
+            agentCalledAt: new Date()
+          }
+        })
+      }
+
+      if (status === "PROCESSING" || status === "INITIATED") {
+        if (caseRecord.currentIssueId === null) {
+          const issue = await this.prisma.issueEvent.create({
+            data: {
+              caseId: caseId,
+              customerId: caseRecord.customerId,
+              userId: userId
+            }
+          })
+
+          await this.prisma.case.update({
+            where: {
+              id: caseId
+            },
+            data: {
+              currentIssueId: issue.id
+            }
+          })
+        } else {
+          await this.prisma.issueEvent.update({
+            where: {
+              id: caseRecord.currentIssueId
+            },
+            data: {
+              userId: userId,
+              agentLinkedAt: new Date(),
+              isActive: true
+            }
+          })
+        }
+      }
+
 
 
 

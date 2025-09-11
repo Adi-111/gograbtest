@@ -172,4 +172,6 @@ export class CronService {
             this.logger.error('❌ Failed to upload products:', error);
         }
     }
+
+    
 }

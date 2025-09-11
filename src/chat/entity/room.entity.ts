@@ -9,6 +9,7 @@ export class RoomEntity implements Case {
     ) {
         Object.assign(this, partial);
     }
+    currentIssueId: number | null;
 
     @IsNumber()
     id: number;

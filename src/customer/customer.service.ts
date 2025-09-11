@@ -10,6 +10,8 @@ import { TransactionInfoDto } from './gg-backend/dto/transaction-info.dto';
 import { MergedProductDetail } from './types';
 import { WAComponent } from './dto/send-template.dto';
 import { VendInfoDto } from './gg-backend/dto/VendInfoDto';
+import { MachineDto } from './gg-backend/dto/machine.dto';
+import { ClientMachineDto } from './dto/ClientMachine.dto';
 
 
 
@@ -324,6 +326,14 @@ export class CustomerService {
                         unread: 1
                     }
                 })
+                await this.prisma.issueEvent.update({
+                    where: {
+                        id: updatedCase.currentIssueId
+                    },
+                    data: {
+                        agentCalledAt: new Date()
+                    }
+                })
                 return { customer, case: updatedCase };
             }
 
@@ -390,6 +400,7 @@ export class CustomerService {
 
                         if (lastBotNodeId === 'main_question-FyKfq') {
                             await this.chatService.triggerStatusUpdate(caseRecord.id, Status.INITIATED, 5, CaseHandler.USER);
+
                         }
                         if (lastBotNodeId === 'main_question-FyKff') {
                             await this.chatService.triggerStatusUpdate(caseRecord.id, Status.INITIATED, 5, CaseHandler.USER);
@@ -697,6 +708,23 @@ export class CustomerService {
             },
             include: { customer: true, }
         });
+        if (activeCase && activeCase.currentIssueId === null) {
+            const issueEvent = await this.prisma.issueEvent.create({
+                data: {
+                    caseId: activeCase.id,
+                    customerId: customerId,
+                }
+            })
+            await this.prisma.case.update({
+                where: {
+                    id: activeCase.id
+                },
+                data: {
+                    currentIssueId: issueEvent.id,
+                }
+            })
+            this.logger.log(issueEvent.id)
+        }
         if (!activeCase) {
             const newCase = await this.prisma.case.create({
                 data: {
@@ -720,7 +748,26 @@ export class CustomerService {
                     await this.botService.botSendByNodeId('off-time', customer.phoneNo, newCase.id);
                 }
             }
-            return newCase;
+            // 
+            const issueEvent = await this.prisma.issueEvent.create({
+                data: {
+                    caseId: newCase.id,
+                    customerId: customer.id,
+                }
+            })
+            const updatedCase = await this.prisma.case.update({
+                where: {
+                    id: newCase.id
+                },
+                data: {
+                    currentIssueId: issueEvent.id
+                },
+                include: {
+                    customer: true,
+                    notes: true,
+                }
+            })
+            return updatedCase;
         }
         if (activeCase && activeCase.isNewCase) await this.prisma.case.update({ where: { id: activeCase.id }, data: { isNewCase: false } });
 
@@ -1127,6 +1174,16 @@ export class CustomerService {
         } catch (error) {
             console.error("Error updating agent deadline:", error);
         }
+    }
+
+    async machineDetails() {
+        const data: MachineDto[] = await this.gg_backend_service.getAllMachines()
+        const safeData = data.map(t => ({
+            machine_id: t.machine_id,
+            machine_name: t.machine_name,
+            location: t.location
+        }))
+        return safeData;
     }
 
 
