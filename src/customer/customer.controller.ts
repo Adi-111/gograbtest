@@ -133,6 +133,12 @@ export class CustomerController {
     return await this.ggAppBackend.percentResolvedWithoutAgent()
   }
 
+  @Get('agent-metric')
+  async agentMetrics(
+  ) {
+    return await this.ggAppBackend.agentsChatRefundsAndFRT()
+  }
+
   // @Get('getAllCustomer')
   // @ApiCreatedResponse({ type: [CustomerEntity] })
   // async getAllCustomer(): Promise<CustomerEntity[]> {

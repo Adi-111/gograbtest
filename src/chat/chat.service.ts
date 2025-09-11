@@ -103,7 +103,7 @@ export class ChatService {
                     timestamp: new Date(),
                 };
 
-                
+
 
                 // Create message with nested connections
                 const message: ChatEntity = await tx.message.create({
@@ -506,7 +506,7 @@ export class ChatService {
             throw new Error('InteractiveList node missing sections');
         }
 
-        const currentIssueId = await this.prisma.case
+
 
         const message = {
             text: (node.body as any)?.text || 'Please select from the list:',

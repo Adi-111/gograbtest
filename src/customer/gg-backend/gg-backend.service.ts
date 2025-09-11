@@ -20,6 +20,14 @@ type IssueSummary = {
     latestIssue: { id: number; at: Date } | null;
 };
 
+type AgentFRTSummary = {
+    agentId: number;
+    agentName: string;
+    totalChats: number;
+    manualRefunds: number;
+    avgFRTMinutes: number; // 2 decimals
+};
+
 
 
 
@@ -353,17 +361,18 @@ export class GGBackendService {
         return data;
     }
     async percentResolvedWithoutAgent() {
-        // 1) Fetch all resolved issues (closedAt not null)
+
+        //all solved issues
         const issues = await this.prisma.issueEvent.findMany({
             where: {
-                closedAt: { not: null },
-                machineName: { not: null }, // optional: only machine-related
+                status: "CLOSED"
             },
             select: {
-                id: true,
-                closedAt: true,
+                userId: true,
                 agentCalledAt: true,
-            },
+                agentLinkedAt: true
+
+            }
         });
 
         // 2) Aggregate in JS
@@ -373,7 +382,7 @@ export class GGBackendService {
         }
 
         const resolvedWithoutAgent = issues.filter(
-            (i) => i.agentCalledAt === null
+            (i) => i.userId === null
         ).length;
 
         const percentage = (resolvedWithoutAgent / totalResolved) * 100;
@@ -392,6 +401,7 @@ export class GGBackendService {
         // 1) Fetch raw rows (only constraint: machineName NOT NULL)
         const issues = await this.prisma.issueEvent.findMany({
             where: { machineName: { not: null } }, // add your other filters if needed
+
             select: {
                 id: true,
                 machineName: true,
@@ -437,6 +447,102 @@ export class GGBackendService {
         // 3) Return sorted by total desc (do other sorts as you like)
         return Array.from(map.values()).sort((a, b) => b.total - a.total);
     }
+
+
+    async agentsChatRefundsAndFRT(): Promise<AgentFRTSummary[]> {
+        // 1) Get ONLY agent messages that belong to an IssueEvent, ordered so we can detect "first agent per issue"
+        const rows = await this.prisma.message.findMany({
+            where: {
+                issueEventId: { not: null },
+                senderType: "USER", // adjust if your enum strings differ
+            },
+            select: {
+                id: true,
+                timestamp: true,
+                userId: true,
+                user: { select: { id: true, email: true } },
+                issueEventId: true,
+                issueEvent: {
+                    select: {
+                        id: true,
+                        openedAt: true,
+                        refundMode: true, // MANUAL or null/other
+                    },
+                },
+            },
+            orderBy: [
+                { issueEventId: 'asc' },
+                { timestamp: 'asc' },
+                { id: 'asc' }, // tie-break
+            ],
+        });
+
+        // 2) Walk once to determine the FIRST agent per IssueEvent
+        const firstAgentByIssue = new Map<number, {
+            agentId: number | null;
+            agentName: string;
+            firstAgentTime: Date;
+            openedAt: Date;
+            isManualRefund: boolean;
+        }>();
+
+        for (const r of rows) {
+            const issueId = r.issueEventId!;
+            if (!firstAgentByIssue.has(issueId)) {
+                firstAgentByIssue.set(issueId, {
+                    agentId: r.userId ?? null,
+                    agentName: r.user?.email ?? `Agent#${r.userId ?? 'unknown'}`,
+                    firstAgentTime: r.timestamp,
+                    openedAt: r.issueEvent!.openedAt,
+                    isManualRefund: r.issueEvent!.refundMode === 'MANUAL',
+                });
+            }
+        }
+
+        // 3) Aggregate per agent
+        const agg = new Map<number, {
+            agentName: string;
+            totalChats: number;
+            manualRefunds: number;
+            frtSumMs: number;
+            frtCount: number;
+        }>();
+
+        for (const entry of firstAgentByIssue.values()) {
+            if (entry.agentId == null) continue; // skip if we can't attribute to a user
+
+            const frtMs = entry.firstAgentTime.getTime() - entry.openedAt.getTime();
+            if (!agg.has(entry.agentId)) {
+                agg.set(entry.agentId, {
+                    agentName: entry.agentName,
+                    totalChats: 0,
+                    manualRefunds: 0,
+                    frtSumMs: 0,
+                    frtCount: 0,
+                });
+            }
+            const a = agg.get(entry.agentId)!;
+            a.totalChats += 1;
+            if (entry.isManualRefund) a.manualRefunds += 1;
+            if (frtMs >= 0) {
+                a.frtSumMs += frtMs;
+                a.frtCount += 1;
+            }
+        }
+
+        // 4) Format & sort (by total chats desc)
+        const result: AgentFRTSummary[] = Array.from(agg.entries()).map(([agentId, a]) => ({
+            agentId,
+            agentName: a.agentName,
+            totalChats: a.totalChats,
+            manualRefunds: a.manualRefunds,
+            avgFRTMinutes: a.frtCount ? Math.round(((a.frtSumMs / a.frtCount) / 60000) * 100) / 100 : 0,
+        }));
+
+        result.sort((x, y) => y.totalChats - x.totalChats);
+        return result;
+    }
+
 
 
 
