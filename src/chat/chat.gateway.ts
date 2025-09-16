@@ -34,6 +34,7 @@ import { UnreadHandlerEntity } from './entity/unread-handler.entity';
 import { FailedMessageDto } from './dto/failed-message.dto';
 import { UpdateCaseDto } from 'src/cases/dto/update-case.dto';
 import { updateIssueDto } from './dto/UpdateIssue.DTO';
+import { userInfo } from 'os';
 
 @WebSocketGateway({
   cors: {
@@ -544,9 +545,10 @@ export class ChatGateway
   }
 
   @SubscribeMessage("updateIssue")
-  async handleEvent(@MessageBody() payload: updateIssueDto) {
+  async handleEvent(client: Socket, payload: updateIssueDto) {
     const {
       caseId,
+      userId,
       status,        // Case-level status
       machineDetails,
       issueType,
@@ -558,7 +560,7 @@ export class ChatGateway
     // 1) Get active issue for this case
     const kase = await this.prisma.case.findUnique({
       where: { id: caseId },
-      select: { currentIssueId: true },
+      select: { currentIssueId: true, status: true },
     });
 
     if (!kase) {
@@ -604,6 +606,7 @@ export class ChatGateway
           refundAmountMinor: refundAmountMinor,
           resolutionNotes: notes ?? null,
         },
+
       }),
 
       // Update the parent Case status (if that's your desired flow)
@@ -618,6 +621,50 @@ export class ChatGateway
         select: { id: true, status: true },
       }),
     ]);
+    const dCase = await this.prisma.case.findUnique({
+      where: {
+        id: caseId
+      },
+      include: {
+        customer: true,
+        messages: true,
+        notes: true,
+        user: true
+      }
+
+    })
+    await this.recordStatusChange(caseId, userId, kase.status, dCase.status);
+
+    const updatedEvents = await this.prisma.statusEvent.findMany({
+      where: { caseId },
+      include: { user: true },
+      orderBy: { timestamp: 'asc' },
+    });
+
+
+    client.emit('status-events', updatedEvents);
+
+    const baseChatInfo = {
+      id: dCase.id,
+      customerName: dCase.customer.name,
+      messages: dCase.messages,
+      status: dCase.status,
+      unread: dCase.unread,
+      notes: dCase.notes,
+    };
+    const chatInfo =
+      dCase.assignedTo === CaseHandler.USER
+        ? { ...baseChatInfo, handler: `${dCase.user.firstName}` }
+        : {
+          ...baseChatInfo,
+          handler: String(dCase.assignedTo),
+          img: dCase.customer.profileImageUrl,
+        };
+
+    client.emit('chat-info-response', chatInfo);
+    this.logger.debug(
+      `Sent chat-info-response (user path) ${{ caseId }}`,
+    );
 
     // 4) Optionally notify room/subscribers
     // this.server.to(`case:${caseId}`).emit("issue-updated", {
@@ -633,66 +680,277 @@ export class ChatGateway
   @SubscribeMessage('update-contact-status')
   async updateContactStatus(
     client: Socket,
-    payload: { caseId: number; status: Status; userId: number, assignedTo?: CaseHandler },
+    payload: { caseId: number; status: Status; userId?: number; assignedTo?: CaseHandler },
   ): Promise<void> {
+    // ---- request-scoped tracing context
+    const reqId = Math.random().toString(36).slice(2, 10);
+    const startedAt = Date.now();
+
+    const logCtx = (extra?: Record<string, unknown>) =>
+      JSON.stringify({
+        reqId,
+        ...extra,
+      });
+
     try {
-      const { caseId, status, userId } = payload;
+      const { caseId, status, userId, assignedTo } = payload;
+      this.logger.log(
+        `update-contact-status: received ${logCtx({ payload: { caseId, status, userId, assignedTo } })}`,
+      );
 
-
+      // ---- fetch case
       const caseRecord = await this.prisma.case.findUnique({
         where: { id: payload.caseId },
         select: { status: true, currentIssueId: true, customerId: true },
       });
-      if (!caseRecord) throw new Error('Case not found');
-      if (payload.assignedTo === 'USER') {
-        await this.prisma.issueEvent.update({
-          where: {
-            id: caseRecord.currentIssueId
-          },
-          data: {
-            agentCalledAt: new Date()
-          }
-        })
+
+      if (!caseRecord) {
+        this.logger.warn(
+          `update-contact-status: case not found ${logCtx({ caseId })}`,
+        );
+        throw new Error('Case not found');
       }
 
-      if (status === "PROCESSING" || status === "INITIATED") {
-        if (caseRecord.currentIssueId === null) {
-          const issue = await this.prisma.issueEvent.create({
-            data: {
-              caseId: caseId,
-              customerId: caseRecord.customerId,
-              userId: userId
-            }
-          })
+      this.logger.debug(
+        `Loaded case ${logCtx({
+          caseId,
+          customerId: caseRecord.customerId,
+          prevStatus: caseRecord.status,
+          currentIssueId: caseRecord.currentIssueId,
+        })}`,
+      );
 
-          await this.prisma.case.update({
-            where: {
-              id: caseId
-            },
-            data: {
-              currentIssueId: issue.id
-            }
-          })
+      // =========================
+      // BOT / NO-USER PATH
+      // =========================
+      if (!userId) {
+        this.logger.debug(
+          `No userId provided → treating as bot/automated transition ${logCtx({
+            caseId,
+            status,
+            assignedTo,
+          })}`,
+        );
+
+        if (assignedTo === 'USER') {
+          if (caseRecord.currentIssueId == null) {
+            this.logger.warn(
+              `assignedTo=USER but currentIssueId is null; skipping agentCalledAt update ${logCtx(
+                { caseId },
+              )}`,
+            );
+          } else {
+            await this.prisma.issueEvent.update({
+              where: { id: caseRecord.currentIssueId },
+              data: { agentCalledAt: new Date() },
+            });
+            this.logger.debug(
+              `issueEvent.agentCalledAt set ${logCtx({
+                issueId: caseRecord.currentIssueId,
+              })}`,
+            );
+          }
+        }
+
+        // if case moved to active processing/init, ensure issue linkage
+        if (status === 'PROCESSING' || status === 'INITIATED') {
+          if (caseRecord.currentIssueId == null) {
+            const issue = await this.prisma.issueEvent.create({
+              data: {
+                caseId,
+                customerId: caseRecord.customerId,
+                userId: null,
+              },
+            });
+            this.logger.debug(
+              `Created new issue for bot path ${logCtx({
+                caseId,
+                issueId: issue.id,
+              })}`,
+            );
+
+            await this.prisma.case.update({
+              where: { id: caseId },
+              data: { currentIssueId: issue.id },
+            });
+            this.logger.debug(
+              `Linked case.currentIssueId ${logCtx({
+                caseId,
+                issueId: issue.id,
+              })}`,
+            );
+          } else {
+            await this.prisma.issueEvent.update({
+              where: { id: caseRecord.currentIssueId },
+              data: {
+                userId: null,
+                agentLinkedAt: new Date(),
+                isActive: true,
+              },
+            });
+            this.logger.debug(
+              `Updated existing issue (bot path) ${logCtx({
+                issueId: caseRecord.currentIssueId,
+              })}`,
+            );
+          }
+        }
+
+        const updatedCase = await this.prisma.case.update({
+          where: { id: caseId },
+          data: { status, lastBotNodeId: null, ...(assignedTo && { assignedTo }) },
+          select: {
+            id: true,
+            assignedTo: true,
+            tags: true,
+            customer: true,
+            user: true,
+            status: true,
+            messages: { orderBy: { timestamp: 'desc' }, take: 1 },
+            unread: true,
+            notes: { include: { user: true } },
+          },
+        });
+        this.logger.debug(
+          `Case updated (bot path) ${logCtx({
+            caseId,
+            newStatus: updatedCase.status,
+            assignedTo: updatedCase.assignedTo,
+          })}`,
+        );
+
+        await this.recordStatusChange(caseId, null, caseRecord.status, status);
+        this.logger.debug(
+          `recordStatusChange completed (bot path) ${logCtx({
+            caseId,
+            from: caseRecord.status,
+            to: status,
+          })}`,
+        );
+
+        const updatedEvents = await this.prisma.statusEvent.findMany({
+          where: { caseId },
+          include: { user: true },
+          orderBy: { timestamp: 'asc' },
+        });
+        this.logger.debug(
+          `Fetched status events (bot path) ${logCtx({
+            caseId,
+            events: updatedEvents.length,
+          })}`,
+        );
+
+        client.emit('status-events', updatedEvents);
+        this.server.to(`case-${caseId}`).emit('status-events', updatedEvents);
+        this.server.to(`case-${caseId}`).emit('contact-updated', updatedCase);
+        this.logger.log(
+          `Emitted updates to room case-${caseId} (bot path) ${logCtx({
+            caseId,
+          })}`,
+        );
+
+        const baseChatInfo = {
+          id: updatedCase.id,
+          customerName: updatedCase.customer.name,
+          messages: updatedCase.messages,
+          status: updatedCase.status,
+          unread: updatedCase.unread,
+          notes: updatedCase.notes,
+        };
+        const chatInfo =
+          updatedCase.assignedTo === CaseHandler.USER
+            ? { ...baseChatInfo, handler: `${updatedCase.user.firstName}` }
+            : {
+              ...baseChatInfo,
+              handler: String(updatedCase.assignedTo),
+              img: updatedCase.customer.profileImageUrl,
+            };
+
+        client.emit('chat-info-response', chatInfo);
+        this.logger.debug(
+          `Sent chat-info-response (bot path) ${logCtx({ caseId })}`,
+        );
+
+        this.logger.log(
+          `update-contact-status completed (bot path) ${logCtx({
+            caseId,
+            durationMs: Date.now() - startedAt,
+          })}`,
+        );
+        return; // bot path ends here
+      }
+
+      // =========================
+      // USER / AGENT PATH
+      // =========================
+      if (assignedTo === 'USER') {
+        if (caseRecord.currentIssueId == null) {
+          this.logger.warn(
+            `assignedTo=USER but currentIssueId is null; skipping agentCalledAt update ${logCtx(
+              { caseId },
+            )}`,
+          );
         } else {
           await this.prisma.issueEvent.update({
-            where: {
-              id: caseRecord.currentIssueId
+            where: { id: caseRecord.currentIssueId },
+            data: { agentCalledAt: new Date() },
+          });
+          this.logger.debug(
+            `issueEvent.agentCalledAt set ${logCtx({
+              issueId: caseRecord.currentIssueId,
+            })}`,
+          );
+        }
+      }
+
+      if (status === 'PROCESSING' || status === 'INITIATED') {
+        if (caseRecord.currentIssueId == null) {
+          const issue = await this.prisma.issueEvent.create({
+            data: {
+              caseId,
+              customerId: caseRecord.customerId,
+              userId: userId,
             },
+          });
+          this.logger.debug(
+            `Created new issue (user path) ${logCtx({ caseId, issueId: issue.id })}`,
+          );
+
+          await this.prisma.case.update({
+            where: { id: caseId },
+            data: { currentIssueId: issue.id },
+          });
+          this.logger.debug(
+            `Linked case.currentIssueId (user path) ${logCtx({
+              caseId,
+              issueId: issue.id,
+            })}`,
+          );
+        } else {
+          await this.prisma.issueEvent.update({
+            where: { id: caseRecord.currentIssueId },
             data: {
               userId: userId,
               agentLinkedAt: new Date(),
-              isActive: true
-            }
-          })
+              isActive: true,
+            },
+          });
+          this.logger.debug(
+            `Updated existing issue (user path) ${logCtx({
+              issueId: caseRecord.currentIssueId,
+            })}`,
+          );
         }
       }
 
 
 
 
+
+
       const updatedCase = await this.prisma.case.update({
         where: { id: caseId },
-        data: { status, lastBotNodeId: null, ...(payload.assignedTo && { assignedTo: payload.assignedTo }) },
+        data: { status, lastBotNodeId: null, ...(assignedTo && { assignedTo }) },
         select: {
           id: true,
           assignedTo: true,
@@ -702,26 +960,44 @@ export class ChatGateway
           status: true,
           messages: { orderBy: { timestamp: 'desc' }, take: 1 },
           unread: true,
-          notes: {
-            include: {
-              user: true
-            }
-          },
+          notes: { include: { user: true } },
         },
       });
-
+      this.logger.debug(
+        `Case updated (user path) ${logCtx({
+          caseId,
+          newStatus: updatedCase.status,
+          assignedTo: updatedCase.assignedTo,
+        })}`,
+      );
 
       await this.recordStatusChange(caseId, userId, caseRecord.status, status);
+      this.logger.debug(
+        `recordStatusChange completed (user path) ${logCtx({
+          caseId,
+          from: caseRecord.status,
+          to: status,
+        })}`,
+      );
+
       const updatedEvents = await this.prisma.statusEvent.findMany({
         where: { caseId },
-        include: { user: true, },
+        include: { user: true },
         orderBy: { timestamp: 'asc' },
       });
-      client.emit('status-events', updatedEvents); // send to sender
-      this.server.to(`case-${caseId}`).emit('status-events', updatedEvents); // broadcast to room
+      this.logger.debug(
+        `Fetched status events (user path) ${logCtx({
+          caseId,
+          events: updatedEvents.length,
+        })}`,
+      );
 
-
+      client.emit('status-events', updatedEvents);
+      this.server.to(`case-${caseId}`).emit('status-events', updatedEvents);
       this.server.to(`case-${caseId}`).emit('contact-updated', updatedCase);
+      this.logger.log(
+        `Emitted updates to room case-${caseId} (user path) ${logCtx({ caseId })}`,
+      );
 
       const baseChatInfo = {
         id: updatedCase.id,
@@ -731,7 +1007,6 @@ export class ChatGateway
         unread: updatedCase.unread,
         notes: updatedCase.notes,
       };
-
       const chatInfo =
         updatedCase.assignedTo === CaseHandler.USER
           ? { ...baseChatInfo, handler: `${updatedCase.user.firstName}` }
@@ -742,9 +1017,37 @@ export class ChatGateway
           };
 
       client.emit('chat-info-response', chatInfo);
+      this.logger.debug(
+        `Sent chat-info-response (user path) ${logCtx({ caseId })}`,
+      );
 
-    } catch (error) {
-      this.emitError(client, 'update-contact-status', error);
+      this.logger.log(
+        `update-contact-status completed (user path) ${logCtx({
+          caseId,
+          durationMs: Date.now() - startedAt,
+        })}`,
+      );
+    } catch (error: any) {
+      // ---- error logging with full context & stack
+      this.logger.error(
+        `update-contact-status failed ${JSON.stringify({
+          reqId,
+          message: error?.message,
+        })}`,
+        error?.stack,
+      );
+
+      try {
+        this.emitError(client, 'update-contact-status', error);
+      } catch (emitErr: any) {
+        this.logger.error(
+          `emitError failed ${JSON.stringify({
+            reqId,
+            message: emitErr?.message,
+          })}`,
+          emitErr?.stack,
+        );
+      }
     }
   }
   async handleUpdateContactStatus(
@@ -1170,22 +1473,60 @@ export class ChatGateway
     return c.unread ?? 0;
   }
   // Log status change in StatusEvent table
-  private async recordStatusChange(caseId: number, userId: number, previousStatus: Status, newStatus: Status): Promise<void> {
+  private async recordStatusChange(
+    caseId: number,
+    userId: number | null,          // <-- allow null for bot
+    previousStatus: Status,
+    newStatus: Status
+  ): Promise<void> {
     try {
-      if (newStatus === 'SOLVED') await this.prisma.case.update({ where: { id: caseId }, data: { lastBotNodeId: null, meta: { refundScreenshotTries: 0, refundScreenshotActive: false }, unread: 0 } });
-      await this.prisma.statusEvent.create({
-        data: {
-          caseId,
-          userId,
-          previousStatus,
-          newStatus,
-        },
-      });
-      this.logger.log(`Status change recorded for case ${caseId}: ${previousStatus} -> ${newStatus} by user ${userId}`);
-    } catch (error) {
-      this.logger.error(`Failed to record status change for case ${caseId}: ${error.message}`);
+      if (newStatus === 'SOLVED') {
+        await this.prisma.case.update({
+          where: { id: caseId },
+          data: {
+            lastBotNodeId: null,
+            meta: { refundScreenshotTries: 0, refundScreenshotActive: false },
+            unread: 0,
+          },
+        });
+      }
+
+      // IMPORTANT:
+      // - Use relation connect for Case (error was "Argument `case` is missing.")
+      // - Only include userId if it's not null (avoid violating non-null schema)
+      if (userId) {
+        await this.prisma.statusEvent.create({
+          data: {
+            previousStatus,
+            newStatus,
+            user: { connect: { id: userId } },
+            case: { connect: { id: caseId } },
+          },
+        });
+      } else {
+        await this.prisma.statusEvent.create({
+          data: {
+            previousStatus,
+            newStatus,
+            case: { connect: { id: caseId } },
+          },
+        });
+      }
+
+
+      this.logger.log(
+        `Status change recorded for case ${caseId}: ${previousStatus} -> ${newStatus}` +
+        (userId != null ? ` by user ${userId}` : ' (bot)')
+      );
+    } catch (error: any) {
+      // include stack for easier debugging
+      this.logger.error(
+        `Failed to record status change for case ${caseId}: ${error?.message}`,
+        error?.stack
+      );
     }
   }
+
 
   async handleFailedMessage(failedMessageDto: FailedMessageDto, client: Socket): Promise<void> {
     this.logger.log(failedMessageDto);

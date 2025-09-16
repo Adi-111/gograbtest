@@ -75,6 +75,18 @@ export class ChatService {
         });
     }
 
+    async triggerStatusUpdateBot(caseId: number, status: Status, assignedTo?: CaseHandler) {
+        const dummyClient: any = {
+            emit: () => { }, // No actual socket needed
+        };
+
+        await this.chatGateway.updateContactStatus(dummyClient, {
+            caseId,
+            status,
+            assignedTo
+        });
+    }
+
     private maskPhone(n?: string | null) {
         if (!n) return '';
         // keep last 4 digits, mask the rest

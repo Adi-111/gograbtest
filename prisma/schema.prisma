@@ -224,8 +224,8 @@ model StatusEvent {
   id             Int      @id @default(autoincrement())
   caseId         Int
   case           Case     @relation(fields: [caseId], references: [id])
-  userId         Int
-  user           User     @relation(fields: [userId], references: [id])
+  userId        Int?
+  user           User?     @relation(fields: [userId], references: [id])
   previousStatus Status
   newStatus      Status
   timestamp      DateTime @default(now())

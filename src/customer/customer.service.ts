@@ -399,11 +399,11 @@ export class CustomerService {
                         // 🔁 HARDCODED FLOW EXAMPLE
 
                         if (lastBotNodeId === 'main_question-FyKfq') {
-                            await this.chatService.triggerStatusUpdate(caseRecord.id, Status.INITIATED, 5, CaseHandler.USER);
+                            await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.INITIATED, CaseHandler.USER);
 
                         }
                         if (lastBotNodeId === 'main_question-FyKff') {
-                            await this.chatService.triggerStatusUpdate(caseRecord.id, Status.INITIATED, 5, CaseHandler.USER);
+                            await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.INITIATED, CaseHandler.USER);
                         }
 
                         if (lastBotNodeId === 'main_question-sZPbm') {
@@ -467,7 +467,7 @@ export class CustomerService {
                             return { customer, case: caseRecord }; // VERY IMPORTANT - return here after refund block
                         }
                         else if (lastBotNodeId === 'main_message-done') {
-                            await this.chatService.triggerStatusUpdate(caseRecord.id, Status.SOLVED, 5);
+                            await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.SOLVED,);
                         }
 
 
@@ -487,7 +487,7 @@ export class CustomerService {
                             await this.botService.botSendByNodeId('main_buttons-MYBpQ', phoneNo, caseRecord.id)
                         }
                         else if (lastBotNodeId === 'las') {
-                            await this.chatService.triggerStatusUpdate(caseRecord.id, Status.SOLVED, 5);
+                            await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.SOLVED);
                         }
                         else if (lastBotNodeId === 'main_question-FyKfq') {
                             await this.botService.botSendByNodeId('main_buttons-JYKle', phoneNo, caseRecord.id)
@@ -783,7 +783,7 @@ export class CustomerService {
 
         if (condition1 || condition2) {
             this.logger.log("welcome2")
-            await this.chatService.triggerStatusUpdate(activeCase.id, Status.INITIATED, 5, 'BOT')
+            await this.chatService.triggerStatusUpdateBot(activeCase.id, Status.INITIATED, 'BOT')
             await this.botService.sendWelcomeMsg(activeCase.customer.phoneNo, activeCase.id);
         }
         if (activeCase && activeCase.lastBotNodeId === 'main_message-ILtoz') {

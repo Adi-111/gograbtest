@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { CustomerService } from '../customer/customer.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { BotReplies, MessageType, ReplyType, SenderType, Status, SystemMessageStatus } from '@prisma/client';
+import { BotReplies, CaseHandler, MessageType, ReplyType, SenderType, Status, SystemMessageStatus } from '@prisma/client';
 import { ChatService } from 'src/chat/chat.service';
 import { RefundDetailDto } from 'src/customer/dto/refund-details.dto';
 import { MergedProductDetail } from 'src/customer/types';
@@ -19,8 +19,14 @@ export class BotService {
         private readonly prisma: PrismaService
     ) { }
 
+
+
+
     async getAllBotReplies() {
         return await this.prisma.botReplies.findMany();
+    }
+    async updateStatusByBot(caseId: number, status: Status, assignedTo?: CaseHandler) {
+        return await this.chatService.triggerStatusUpdateBot(caseId, status, assignedTo);
     }
 
     public async processNode(phoneNumber: string, node: BotReplies, caseId: number): Promise<void> {
@@ -82,7 +88,7 @@ export class BotService {
                 else if (node.nodeId === 'main_message-ILtoz') {
                     const caseRecord = await this.prisma.case.findUnique({ where: { id: caseId } });
                     if (caseRecord.status !== 'SOLVED') {
-                        await this.chatService.triggerStatusUpdate(caseId, 'SOLVED', 5);
+                        await this.updateStatusByBot(caseId, 'SOLVED',);
                     }
 
                 } else if (node.nodeId === 'main_message-null') {
@@ -130,6 +136,8 @@ export class BotService {
             // await this.sendFallbackMessage(phoneNo, caseId);
         }
     }
+
+
 
 
     async sendRefundMessage(phoneNumber: string, caseId: number, refDetails: RefundDetailDto) {
