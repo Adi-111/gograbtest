@@ -9,9 +9,8 @@ import { GGBackendService } from './gg-backend/gg-backend.service';
 import { TransactionInfoDto } from './gg-backend/dto/transaction-info.dto';
 import { MergedProductDetail } from './types';
 import { WAComponent } from './dto/send-template.dto';
-import { VendInfoDto } from './gg-backend/dto/VendInfoDto';
 import { MachineDto } from './gg-backend/dto/machine.dto';
-import { ClientMachineDto } from './dto/ClientMachine.dto';
+
 
 
 

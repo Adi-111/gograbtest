@@ -114,6 +114,24 @@ export class ChatService {
                     systemStatus: createMessageDto.systemStatus || SystemMessageStatus.SENT,
                     timestamp: new Date(),
                 };
+                let currIssueId = caseRecord.currentIssueId;
+                if (!caseRecord.currentIssueId) {
+                    const issueNew = await this.prisma.issueEvent.create({
+                        data: {
+                            caseId: caseRecord.id,
+                            customerId: caseRecord.customerId
+                        }
+                    })
+                    await this.prisma.case.update({
+                        where: {
+                            id: caseRecord.id
+                        },
+                        data: {
+                            currentIssueId: issueNew.id
+                        }
+                    })
+                    currIssueId = issueNew.id
+                }
 
 
 
@@ -122,7 +140,7 @@ export class ChatService {
                     data: {
                         ...baseData,
                         case: { connect: { id: createMessageDto.caseId } },
-                        issueEvent: { connect: { id: caseRecord.currentIssueId } },
+                        issueEvent: { connect: { id: currIssueId } },
                         ...(createMessageDto.userId && { user: { connect: { id: createMessageDto.userId } } }),
                         ...(createMessageDto.botId && { bot: { connect: { id: createMessageDto.botId } } }),
                         ...(createMessageDto.whatsAppCustomerId && {

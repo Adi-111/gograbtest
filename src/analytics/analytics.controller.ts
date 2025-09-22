@@ -35,8 +35,6 @@ export class AnalyticsController {
 
   @Get('back')
   async backfill(): Promise<void> {
-    await this.analyticsService.backfillAnalytics();
-    await this.analyticsService.backfillHourlyAnalytics();
-    return;
+    return await this.analyticsService.backfillAllAnalytics();
   }
 }

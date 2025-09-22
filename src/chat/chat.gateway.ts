@@ -134,7 +134,7 @@ export class ChatGateway
       page?: number;
       limit?: number;
       search?: string;
-      status?: Status | 'EXPIRED' | '';
+      status?: Status | 'EXPIRED' | 'UNREAD' | '';
       handler?: string;
       tag?: string;
       viewMode?: 'ACTIVE' | 'ALL';
@@ -164,6 +164,8 @@ export class ChatGateway
           { timer: { lt: new Date() } },
           { status: { not: Status.SOLVED } },
         ];
+      } else if (payload?.status === 'UNREAD') {
+        baseWhere.unread = { gt: 0 };
       } else if (payload?.status) {
         baseWhere.status = payload.status;
       } else if (payload?.viewMode === 'ACTIVE') {
@@ -207,8 +209,6 @@ export class ChatGateway
         }),
       ]);
 
-      const unreadSum = unreadAgg._sum.unread ?? 0;
-
       // Fetch paginated cases
       const paginatedCases = await this.prisma.case.findMany({
         where: baseWhere,
@@ -248,30 +248,44 @@ export class ChatGateway
 
           return validStatus && notUserMsg;
         });
-
-        adjustedFilteredCount = await this.prisma.case.count({
+        const cases = await this.prisma.case.findMany({
           where: {
-            ...baseWhere,
-            status: { in: [Status.ASSIGNED, Status.BOT_HANDLING, Status.INITIATED, Status.PROCESSING, Status.UNSOLVED] },
+            ...baseWhere
+          },
+          select: {
+            id: true,
+            status: true,
+            timer: true,
+            updatedAt: true,
+            assignedTo: true,
+            userId: true,
+            unread: true,
+            customerId: true,
+            // pull the latest message only
             messages: {
-              none: {
-                senderType: 'USER',
-                timestamp: { gte: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30) } // recent 30 days
+              orderBy: { timestamp: "desc" },
+              take: 1,
+              select: {
+                id: true,
+                senderType: true,
+                timestamp: true,
               },
             },
+
           },
+          orderBy: { updatedAt: "desc" },
         });
+
+        adjustedFilteredCount = cases.filter((c) => {
+          const lastMessage = c.messages[0];
+          return !lastMessage || lastMessage.senderType !== SenderType.USER;
+        }).length
       }
 
-      // Unread count
-      const unreadCount = finalCases.filter(chat => (Number(chat.unread)) > 0).length;
 
-      if (payload.viewMode === 'ACTIVE') {
-        this.sendFilteredCount(client, adjustedFilteredCount, unreadCount);
-      }
-      else {
-        this.sendFilteredCount(client, adjustedFilteredCount, unreadCaseCount);
-      }
+
+      this.sendFilteredCount(client, adjustedFilteredCount, unreadCaseCount);
+
 
       // Emit result
       client.emit(UiEntity.render, {
@@ -383,13 +397,31 @@ export class ChatGateway
           currentIssueId: true
         }
       })
+      let currIssueId = newCase.currentIssueId;
+      if (!newCase.currentIssueId) {
+        const issueNew = await this.prisma.issueEvent.create({
+          data: {
+            caseId: caseId,
+            customerId: caseRecord.customerId
+          }
+        })
+        await this.prisma.case.update({
+          where: {
+            id: caseId
+          },
+          data: {
+            currentIssueId: issueNew.id
+          }
+        })
+        currIssueId = issueNew.id
+      }
       await this.prisma.issueEvent.update({
         where: {
-          id: newCase.currentIssueId
+          id: currIssueId
         },
         data: {
           agentLinkedAt: new Date(),
-          userId: newCase.user.id
+          userId: payload.userId
         }
       })
       if (!newCase.user) {
@@ -1123,10 +1155,10 @@ export class ChatGateway
   @SubscribeMessage('update-contact-tags')
   async updateContactTags(
     client: Socket,
-    payload: { caseId: number; tags: string[] },
+    payload: { caseId: number; userId: number; tags: string[] },
   ): Promise<void> {
     try {
-      const { caseId, tags } = payload;
+      const { caseId, userId, tags } = payload;
       if (!caseId || !Array.isArray(tags)) throw new Error('Invalid payload');
 
       const normalized = tags
@@ -1149,7 +1181,7 @@ export class ChatGateway
           this.prisma.tag.create({
             data: {
               text,
-              user: { connect: { id: 1 } }, // 🔁 Replace with real userId if needed
+              user: { connect: { id: userId } }, // 🔁 Replace with real userId if needed
             },
           })
         )
