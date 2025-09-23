@@ -861,6 +861,7 @@ export class CustomerService {
         caseId: number
     ) {
         let media;
+        let locationData;
 
         if (message.type === 'image' || message.type === 'video' || message.type === 'document') {
             const mediaData = message[message.type];
@@ -879,6 +880,21 @@ export class CustomerService {
                 }
             }
         }
+        if (message.type === 'location' && message.location) {
+            const loc = message.location;
+            // Prisma nested create object for one-to-one `Location` -> `Message`
+            locationData = {
+                create: {
+                    latitude: Number(loc.latitude),
+                    longitude: Number(loc.longitude),
+                    name: loc.name ?? null,
+                    address: loc.address ?? null,
+                    url: loc.url ?? null,         // some payloads include a map link
+                    accuracy: loc.accuracy ? Number(loc.accuracy) : null,
+                },
+            };
+        }
+
 
         let content: string;
         if (message.interactive?.button_reply) {
@@ -890,6 +906,12 @@ export class CustomerService {
         } else if (message.type === 'reaction') {
             // If normalization in (1) ever gets skipped, still handle raw reaction safely
             content = message?.reaction?.emoji ?? 'emoji';
+        } else if (message.type === 'location' && message.location) {
+            // user-friendly fallback for timelines/search
+            const { name, address, latitude, longitude } = message.location;
+            content = name
+                ? `Location: ${name}${address ? `, ${address}` : ''} (${latitude}, ${longitude})`
+                : `Location: (${latitude}, ${longitude})${address ? `, ${address}` : ''}`;
         }
 
 
@@ -902,7 +924,9 @@ export class CustomerService {
             timestamp: new Date(parseInt(message.timestamp) * 1000),
             waMessageId: message.id,
             text: content,
-            media,
+            ...(media ? { media } : {}),
+            ...(locationData ? { location: locationData } : {}), // <— NEW
+
         };
 
         const savedM = await this.prisma.message.create({
