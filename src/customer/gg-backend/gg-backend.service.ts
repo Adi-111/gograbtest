@@ -12,20 +12,19 @@ import * as newrelic from 'newrelic';
 import { MachineDto } from "./dto/machine.dto";
 import { IssueType } from "@prisma/client";
 
-type IssueSummary = {
-    machineName: string;
-    total: number;
-    active: number;
-    byType: Record<IssueType, number>;
-    latestIssue: { id: number; at: Date } | null;
-};
 
-type AgentFRTSummary = {
+export type AgentFRTSummary = {
     agentId: number;
     agentName: string;
     totalChats: number;
     manualRefunds: number;
-    avgFRTMinutes: number; // 2 decimals
+    avgFRTMinutes: number;
+};
+
+export type AgentFRTQuery = {
+    from: Date;
+    to: Date;
+    mode?: 'issueOpened' | 'firstReply';
 };
 
 
@@ -360,101 +359,24 @@ export class GGBackendService {
         const data: MachineDto[] = await this.prisma.machine.findMany()
         return data;
     }
-    async percentResolvedWithoutAgent() {
-
-        //all solved issues
-        const issues = await this.prisma.issueEvent.findMany({
-            where: {
-                status: "CLOSED"
-            },
-            select: {
-                userId: true,
-                agentCalledAt: true,
-                agentLinkedAt: true
-
-            }
-        });
-
-        // 2) Aggregate in JS
-        const totalResolved = issues.length;
-        if (totalResolved === 0) {
-            return { totalResolved: 0, resolvedWithoutAgent: 0, percentage: 0 };
-        }
-
-        const resolvedWithoutAgent = issues.filter(
-            (i) => i.userId === null
-        ).length;
-
-        const percentage = (resolvedWithoutAgent / totalResolved) * 100;
-
-        return {
-            totalResolved,
-            resolvedWithoutAgent,
-            percentage: Math.round(percentage * 100) / 100, // 2 decimals
-        };
-    }
 
 
 
 
-    async issueTaggedPerMachine(): Promise<IssueSummary[]> {
-        // 1) Fetch raw rows (only constraint: machineName NOT NULL)
-        const issues = await this.prisma.issueEvent.findMany({
-            where: { machineName: { not: null } }, // add your other filters if needed
-
-            select: {
-                id: true,
-                machineName: true,
-                issueType: true,
-                isActive: true,
-                created_at: true, // or openedAt
-                updatedAt: true,
-            },
-        });
-
-        // 2) Group & aggregate in JS
-        const map = new Map<string, IssueSummary>();
-
-        for (const row of issues) {
-            const name = row.machineName as string; // guaranteed by where clause
-            let entry = map.get(name);
-
-            if (!entry) {
-                // initialize counts for all IssueType keys to 0
-                const byType = Object.create(null) as Record<IssueType, number>;
-                for (const t of Object.values(IssueType)) byType[t as IssueType] = 0;
-
-                entry = {
-                    machineName: name,
-                    total: 0,
-                    active: 0,
-                    byType,
-                    latestIssue: null,
-                };
-                map.set(name, entry);
-            }
-
-            entry.total += 1;
-            if (row.isActive) entry.active += 1;
-            entry.byType[row.issueType] = (entry.byType[row.issueType] ?? 0) + 1;
-
-            const ts = row.updatedAt ?? row.created_at;
-            if (!entry.latestIssue || ts > entry.latestIssue.at) {
-                entry.latestIssue = { id: row.id, at: ts };
-            }
-        }
-
-        // 3) Return sorted by total desc (do other sorts as you like)
-        return Array.from(map.values()).sort((a, b) => b.total - a.total);
-    }
 
 
-    async agentsChatRefundsAndFRT(): Promise<AgentFRTSummary[]> {
-        // 1) Get ONLY agent messages that belong to an IssueEvent, ordered so we can detect "first agent per issue"
+
+
+    async agentsChatRefundsAndFRTInRange(query: AgentFRTQuery): Promise<AgentFRTSummary[]> {
+        const { from, to, mode = 'issueOpened' } = query;
+
+        // 1) Pull USER messages tied to an IssueEvent within the window you care about
+        //    We need ordering to detect "first agent per issue"
         const rows = await this.prisma.message.findMany({
             where: {
                 issueEventId: { not: null },
-                senderType: "USER", // adjust if your enum strings differ
+                senderType: 'USER',
+                timestamp: { gte: new Date(0) }, // we filter via mode below to leverage composite conditions
             },
             select: {
                 id: true,
@@ -466,18 +388,18 @@ export class GGBackendService {
                     select: {
                         id: true,
                         openedAt: true,
-                        refundMode: true, // MANUAL or null/other
+                        refundMode: true,
                     },
                 },
             },
             orderBy: [
                 { issueEventId: 'asc' },
                 { timestamp: 'asc' },
-                { id: 'asc' }, // tie-break
+                { id: 'asc' },
             ],
         });
 
-        // 2) Walk once to determine the FIRST agent per IssueEvent
+        // 2) First agent per IssueEvent
         const firstAgentByIssue = new Map<number, {
             agentId: number | null;
             agentName: string;
@@ -499,7 +421,7 @@ export class GGBackendService {
             }
         }
 
-        // 3) Aggregate per agent
+        // 3) Filter by mode + aggregate
         const agg = new Map<number, {
             agentName: string;
             totalChats: number;
@@ -509,9 +431,17 @@ export class GGBackendService {
         }>();
 
         for (const entry of firstAgentByIssue.values()) {
-            if (entry.agentId == null) continue; // skip if we can't attribute to a user
+            const inByOpened = entry.openedAt >= from && entry.openedAt < to;
+            const inByFirst = entry.firstAgentTime >= from && entry.firstAgentTime < to;
+
+            const include =
+                (mode === 'issueOpened' && inByOpened) ||
+                (mode === 'firstReply' && inByFirst);
+
+            if (!include || entry.agentId == null) continue;
 
             const frtMs = entry.firstAgentTime.getTime() - entry.openedAt.getTime();
+
             if (!agg.has(entry.agentId)) {
                 agg.set(entry.agentId, {
                     agentName: entry.agentName,
@@ -530,7 +460,7 @@ export class GGBackendService {
             }
         }
 
-        // 4) Format & sort (by total chats desc)
+        // 4) Format & sort
         const result: AgentFRTSummary[] = Array.from(agg.entries()).map(([agentId, a]) => ({
             agentId,
             agentName: a.agentName,
@@ -542,7 +472,6 @@ export class GGBackendService {
         result.sort((x, y) => y.totalChats - x.totalChats);
         return result;
     }
-
 
 
 

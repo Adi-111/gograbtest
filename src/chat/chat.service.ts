@@ -49,7 +49,7 @@ export class ChatService {
     }
 
 
-    async handleWhatsappMessage(storedMessage: ChatEntity) {
+    async  handleWhatsappMessage(storedMessage: ChatEntity) {
 
         return this.chatGateway.handleWhatsappMessage(storedMessage);
     };

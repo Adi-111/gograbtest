@@ -13,12 +13,13 @@ import { CronService } from './cron/cron.service';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { CacheModule } from '@nestjs/cache-manager';
+import { MetricModule } from './metric/metric.module';
 
 @Module({
   imports: [PrismaModule, UserModule, AuthModule, CasesModule, CustomerModule, ChatModule, BotModule, CloudModule, ScheduleModule.forRoot(), AnalyticsModule, CacheModule.register({
     ttl: 60 * 9, // 9 minutes cache
     isGlobal: true,
-  }),],
+  }), MetricModule,],
   providers: [Logger, CronService],
 })
 export class AppModule {
