@@ -244,9 +244,10 @@ export class ChatGateway
           ].includes(c.status);
 
           const lastMessage = c.messages?.[0];
-          const notUserMsg = !lastMessage || lastMessage.senderType !== 'USER';
+          // const notUserMsg = !lastMessage || lastMessage.senderType !== 'USER';
 
-          return validStatus && notUserMsg;
+          // return validStatus && notUserMsg;
+          return validStatus;
         });
         const cases = await this.prisma.case.findMany({
           where: {
@@ -276,10 +277,7 @@ export class ChatGateway
           orderBy: { updatedAt: "desc" },
         });
 
-        adjustedFilteredCount = cases.filter((c) => {
-          const lastMessage = c.messages[0];
-          return !lastMessage || lastMessage.senderType !== SenderType.USER;
-        }).length
+        adjustedFilteredCount = cases.length
       }
 
 

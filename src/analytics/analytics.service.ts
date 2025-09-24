@@ -307,10 +307,7 @@ export class AnalyticsService {
             }),
         ]);
 
-        const casesExpired = expiredCandidates.filter(c => {
-            const last = c.messages?.[0];
-            return !last || last.senderType !== SenderType.USER;
-        }).length;
+        const casesExpired = expiredCandidates.length;
 
         await this.prisma.overallAnalytics.upsert({
             where: { id: 1 },
