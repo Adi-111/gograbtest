@@ -585,6 +585,7 @@ export class ChatGateway
       refundMode,
       refundAmount,
       notes,
+      falsePositive
     } = payload;
 
     // 1) Get active issue for this case
@@ -630,11 +631,13 @@ export class ChatGateway
           endTimeAt: new Date(),
 
           // domain fields
+          machine_id: machineDetails.machine.machine_id ?? null,
           machineName: machineDetails?.machine?.machine_name ?? null,
           issueType,
           refundMode: issueType === "REFUND" ? refundMode : null,
           refundAmountMinor: refundAmountMinor,
           resolutionNotes: notes ?? null,
+          falsePositive: refundMode === "MANUAL" ? falsePositive : null
         },
 
       }),

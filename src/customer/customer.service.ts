@@ -548,6 +548,22 @@ export class CustomerService {
                 }
                 return;
             }
+            if (utrId) {
+                const issueId = (await this.prisma.case.findUnique({
+                    where: {
+                        id: caseId
+                    },
+                    select: {
+                        currentIssueId: true
+                    }
+                })).currentIssueId
+                await this.prisma.issueEvent.update({
+                    where: { id: issueId },
+                    data:{
+                        utr:utrId
+                    }
+                })
+            }
             this.logger.warn(`utrId is ${utrId}`)
             let txnInfo: TransactionInfoDto;
 

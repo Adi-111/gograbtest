@@ -14,5 +14,6 @@ export class updateIssueDto {
     issueType: IssueType;
     refundMode: RefundMode;
     refundAmount: number;
-    notes: string
+    notes: string;
+    falsePositive: boolean;
 }

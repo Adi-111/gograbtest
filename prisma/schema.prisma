@@ -187,9 +187,13 @@ model IssueEvent {
   closedAt     DateTime?
 
   // domain fields
+  machine_id String?
   machineName       String?
   issueType         IssueType     @default(OTHER) // NEW
   refundMode        RefundMode?                  // NEW; only when issueType = REFUND
+
+  utr String?
+  falsePositive  Boolean?  
 
   
 
