@@ -49,7 +49,7 @@ export class ChatService {
     }
 
 
-    async  handleWhatsappMessage(storedMessage: ChatEntity) {
+    async handleWhatsappMessage(storedMessage: ChatEntity) {
 
         return this.chatGateway.handleWhatsappMessage(storedMessage);
     };
@@ -708,6 +708,24 @@ export class ChatService {
             // rethrow to upstream handler (global filter / controller)
             throw e;
         }
+    }
+
+    async utrInfo(caseId: number) {
+        const utrIds = await this.prisma.issueEvent.findMany({
+            where: {
+                caseId,
+                utr: {
+                    not: null
+                }
+            },
+            select: {
+                utr: true,
+                caseId: true,
+                id: true
+            }
+        })
+
+        return utrIds;
     }
 
 

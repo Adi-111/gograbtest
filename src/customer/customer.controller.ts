@@ -119,7 +119,12 @@ export class CustomerController {
 
   @Get('get-all-machines')
   async getAllMachines() {
-    return this.ggAppBackend.getAllMachines();
+    return await this.ggAppBackend.getAllMachines();
+  }
+
+  @Get('upsert-machines')
+  async upsertMachine() {
+    return await this.ggAppBackend.getAllMachinesFromGG()
   }
 
 

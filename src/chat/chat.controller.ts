@@ -28,6 +28,11 @@ export class ChatController {
         return await this.chatService.fetchQuickReplies();
     }
 
+    @Get('utr/:caseId')
+    async getAllUtr(@Param('caseId', ParseIntPipe) caseId: number) {
+        return await this.chatService.utrInfo(caseId)
+    }
+
     @Get('machineDetails')
     async getMachineDetails() {
         const data: MachineDetailsDto[] = await this.chatService.getMachineDetails();
