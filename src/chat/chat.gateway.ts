@@ -585,7 +585,8 @@ export class ChatGateway
       refundMode,
       refundAmount,
       notes,
-      falsePositive
+      falsePositive,
+      coil
     } = payload;
 
     // 1) Get active issue for this case
@@ -620,6 +621,11 @@ export class ChatGateway
         ? Math.round(Number(refundAmount) * 100)
         : null;
 
+    const coilNumber =
+      issueType === "REFUND" && refundMode === "MANUAL"
+        ? Number(coil)
+        : null;
+
     // 3) Persist atomically
     const [updatedIssue, updatedCase] = await this.prisma.$transaction([
       this.prisma.issueEvent.update({
@@ -637,7 +643,8 @@ export class ChatGateway
           refundMode: issueType === "REFUND" ? refundMode : null,
           refundAmountMinor: refundAmountMinor,
           resolutionNotes: notes ?? null,
-          falsePositive: refundMode === "MANUAL" ? falsePositive : null
+          falsePositive: refundMode === "MANUAL" ? falsePositive : null,
+          coil: coilNumber,
         },
 
       }),

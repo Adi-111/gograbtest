@@ -16,4 +16,5 @@ export class updateIssueDto {
     refundAmount: number;
     notes: string;
     falsePositive: boolean;
+    coil: number;
 }

@@ -194,6 +194,7 @@ model IssueEvent {
 
   utr String?
   falsePositive  Boolean?  
+  coil Int?
 
   
 
