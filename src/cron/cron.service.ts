@@ -25,6 +25,12 @@ export class CronService {
     }
 
 
+    @Cron(CronExpression.EVERY_6_HOURS)
+    async handleMachineCron() {
+        await this.cusService.syncMachine()
+    }
+
+
 
     @Cron(CronExpression.EVERY_MINUTE)
     handleCron() {
@@ -173,5 +179,5 @@ export class CronService {
         }
     }
 
-    
+
 }

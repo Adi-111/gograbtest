@@ -169,6 +169,10 @@ export class CustomerService {
         }
     }
 
+    async syncMachine() {
+        await this.gg_backend_service.getAllMachinesFromGG();
+    }
+
 
 
     // Send Message
@@ -559,8 +563,8 @@ export class CustomerService {
                 })).currentIssueId
                 await this.prisma.issueEvent.update({
                     where: { id: issueId },
-                    data:{
-                        utr:utrId
+                    data: {
+                        utr: utrId
                     }
                 })
             }

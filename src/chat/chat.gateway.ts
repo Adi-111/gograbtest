@@ -165,7 +165,10 @@ export class ChatGateway
           { status: { not: Status.SOLVED } },
         ];
       } else if (payload?.status === 'UNREAD') {
-        baseWhere.unread = { gt: 0 };
+        baseWhere.AND = [
+          { unread: { gt: 0 } },
+          { status: { not: Status.SOLVED } },
+        ];
       } else if (payload?.status) {
         baseWhere.status = payload.status;
       } else if (payload?.viewMode === 'ACTIVE') {
@@ -618,7 +621,7 @@ export class ChatGateway
     // Store amounts as minor units (e.g., paise)
     const refundAmountMinor =
       issueType === "REFUND" && refundMode === "MANUAL"
-        ? Math.round(Number(refundAmount) * 100)
+        ? Math.round(Number(refundAmount))
         : null;
 
     const coilNumber =
@@ -680,9 +683,17 @@ export class ChatGateway
       include: { user: true },
       orderBy: { timestamp: 'asc' },
     });
+    const updatedIssueEvents = await this.prisma.issueEvent.findMany({
+      where: {
+        id: caseId,
+        status: 'CLOSED',
+        refundMode: 'MANUAL'
+      }
+    })
 
 
     client.emit('status-events', updatedEvents);
+    client.emit('issue-events', updatedIssueEvents);
 
     const baseChatInfo = {
       id: dCase.id,
@@ -1127,6 +1138,27 @@ export class ChatGateway
     });
 
     return { updatedCase, updatedEvents };
+  }
+
+  @SubscribeMessage('get-issue-events')
+  async handleGetIssueEvents(client: Socket, payload: { caseId: number }) {
+    try {
+      const events = await this.prisma.issueEvent.findMany({
+        where: {
+          caseId: payload.caseId,
+          status: "CLOSED",
+          refundMode: 'MANUAL'
+        }
+      })
+      const editedEvents = events.map(el => ({
+        ...el,
+        timestamp: el.closedAt
+      }));
+      this.logger.log(JSON.stringify(editedEvents))
+      client.emit('issue-events', editedEvents)
+    } catch (error) {
+      this.emitError(client, 'get-issue-events', error);
+    }
   }
 
 

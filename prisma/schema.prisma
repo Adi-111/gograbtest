@@ -179,6 +179,7 @@ model IssueEvent {
   caseId       Int
   customerId   Int
   userId       Int?
+  
 
   // lifecycle
   status       IssueEventStatus  @default(OPEN)
