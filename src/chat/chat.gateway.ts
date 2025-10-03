@@ -703,14 +703,28 @@ export class ChatGateway
       unread: dCase.unread,
       notes: dCase.notes,
     };
+    const issue = await this.prisma.issueEvent.findUnique({
+      where: {
+        id: dCase.currentIssueId
+      }
+    })
+    let handlerInfo = String(dCase.assignedTo);
+    if (issue && issue.agentCalledAt && issue.userId === null) {
+      handlerInfo = 'Not Assigned'
+    }
+    else if (dCase.user && dCase.assignedTo === 'USER') {
+      handlerInfo = dCase.user.firstName;
+    }
+    else {
+      handlerInfo = dCase.assignedTo
+    }
+
     const chatInfo =
-      dCase.assignedTo === CaseHandler.USER
-        ? { ...baseChatInfo, handler: `${dCase.user.firstName}` }
-        : {
-          ...baseChatInfo,
-          handler: String(dCase.assignedTo),
-          img: dCase.customer.profileImageUrl,
-        };
+    {
+      ...baseChatInfo,
+      handler: String(handlerInfo),
+      img: dCase.customer.profileImageUrl,
+    };
 
     client.emit('chat-info-response', chatInfo);
     this.logger.debug(
@@ -752,7 +766,7 @@ export class ChatGateway
       // ---- fetch case
       const caseRecord = await this.prisma.case.findUnique({
         where: { id: payload.caseId },
-        select: { status: true, currentIssueId: true, customerId: true },
+        select: { status: true, currentIssueId: true, customerId: true, user: true, assignedTo: true },
       });
 
       if (!caseRecord) {
@@ -908,14 +922,27 @@ export class ChatGateway
           unread: updatedCase.unread,
           notes: updatedCase.notes,
         };
+        const issue = await this.prisma.issueEvent.findUnique({
+          where: {
+            id: caseRecord.currentIssueId
+          }
+        })
+        let handlerInfo = String(caseRecord.assignedTo);
+        if (issue && issue.agentCalledAt && issue.userId === null) {
+          handlerInfo = 'Not Assigned'
+        }
+        else if (caseRecord.user && caseRecord.assignedTo === 'USER') {
+          handlerInfo = caseRecord.user.firstName;
+        }
+        else {
+          handlerInfo = caseRecord.assignedTo
+        }
         const chatInfo =
-          updatedCase.assignedTo === CaseHandler.USER
-            ? { ...baseChatInfo, handler: `${updatedCase.user.firstName}` }
-            : {
-              ...baseChatInfo,
-              handler: String(updatedCase.assignedTo),
-              img: updatedCase.customer.profileImageUrl,
-            };
+        {
+          ...baseChatInfo,
+          handler: String(handlerInfo),
+          img: updatedCase.customer.profileImageUrl,
+        };
 
         client.emit('chat-info-response', chatInfo);
         this.logger.debug(
@@ -1058,12 +1085,39 @@ export class ChatGateway
         unread: updatedCase.unread,
         notes: updatedCase.notes,
       };
+      // let handlerInfo = String(caseRecord.assignedTo);
+      // if (issue && issue.agentCalledAt && issue.userId === null) {
+      //   handlerInfo = 'Not Assigned'
+      // }
+      // else if (caseRecord.user && caseRecord.assignedTo === 'USER') {
+      //   handlerInfo = caseRecord.user.firstName;
+      // }
+      // else {
+      //   handlerInfo = caseRecord.assignedTo
+      // }
+      // const chatInfo =
+      // {
+      //   ...baseChatInfo,
+      //   handler: String(handlerInfo),
+      //   img: caseRecord.customer.profileImageUrl,
+      // };
+      const issue = await this.prisma.issueEvent.findUnique({ where: { id: caseRecord.currentIssueId } })
+      let handlerInfo = String(CaseHandler);
+      if (issue && issue.agentCalledAt && issue.userId === null) {
+        handlerInfo = 'Not Assigned'
+      }
+      else if (caseRecord.user && caseRecord.assignedTo === 'USER') {
+        handlerInfo = caseRecord.user.firstName;
+      }
+      else {
+        handlerInfo = caseRecord.assignedTo
+      }
       const chatInfo =
         updatedCase.assignedTo === CaseHandler.USER
           ? { ...baseChatInfo, handler: `${updatedCase.user.firstName}` }
           : {
             ...baseChatInfo,
-            handler: String(updatedCase.assignedTo),
+            handler: String(handlerInfo),
             img: updatedCase.customer.profileImageUrl,
           };
 
@@ -1395,18 +1449,27 @@ export class ChatGateway
         status: caseRecord.status,
         unread: caseRecord.unread,
       };
-      let handlerInfo = 'Not Assigned'
-      if (caseRecord.user) {
+      const issue = await this.prisma.issueEvent.findUnique({
+        where: {
+          id: caseRecord.currentIssueId
+        }
+      })
+      let handlerInfo = String(caseRecord.assignedTo);
+      if (issue && issue.agentCalledAt && issue.userId === null) {
+        handlerInfo = 'Not Assigned'
+      }
+      else if (caseRecord.user && caseRecord.assignedTo === 'USER') {
         handlerInfo = caseRecord.user.firstName;
       }
+      else {
+        handlerInfo = caseRecord.assignedTo
+      }
       const chatInfo =
-        caseRecord.assignedTo === CaseHandler.USER
-          ? { ...baseChatInfo, handler: `user: ${handlerInfo}` }
-          : {
-            ...baseChatInfo,
-            handler: String(caseRecord.assignedTo),
-            img: caseRecord.customer.profileImageUrl,
-          };
+      {
+        ...baseChatInfo,
+        handler: String(handlerInfo),
+        img: caseRecord.customer.profileImageUrl,
+      };
       client.emit('chat-info-response', chatInfo);
     } catch (error) {
       this.emitError(client, 'chat-info', error);
