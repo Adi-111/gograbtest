@@ -88,7 +88,7 @@ export class BotService {
                 else if (node.nodeId === 'main_message-ILtoz') {
                     const caseRecord = await this.prisma.case.findUnique({ where: { id: caseId } });
                     if (caseRecord.status !== 'SOLVED') {
-                        await this.updateStatusByBot(caseId, 'SOLVED',);
+                        // await this.updateStatusByBot(caseId, 'SOLVED',);
                     }
 
                 } else if (node.nodeId === 'main_message-null') {
