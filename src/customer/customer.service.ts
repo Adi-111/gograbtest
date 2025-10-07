@@ -169,10 +169,6 @@ export class CustomerService {
         }
     }
 
-    async syncMachine() {
-        await this.gg_backend_service.getAllMachinesFromGG();
-    }
-
 
 
     // Send Message
@@ -469,18 +465,14 @@ export class CustomerService {
 
                             return { customer, case: caseRecord }; // VERY IMPORTANT - return here after refund block
                         }
-                        else if (lastBotNodeId === 'main_message-done') {
-                            await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.SOLVED,);
-                        }
+                        // else if (lastBotNodeId === 'main_message-done') {
+                        //     await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.SOLVED,);
+                        // }
 
 
                         else if (lastBotNodeId === 'main_question-uEzow') {
 
-                            await this.botService.botSendByNodeId('main_buttons-uXtwT', phoneNo, caseRecord.id)
-                            // await this.prisma.case.update({
-                            //     where: { id: caseRecord.id },
-                            //     data: { lastBotNodeId: nextNode.nodeId },
-                            // });
+                            await this.botService.botSendByNodeId('main_buttons-uXtwT', phoneNo, caseRecord.id);
 
                         }
                         // else if (lastBotNodeId === 'main_question-nyJZr') {
@@ -489,9 +481,9 @@ export class CustomerService {
                         else if (lastBotNodeId === 'main_question-BPjjT') {
                             await this.botService.botSendByNodeId('main_buttons-MYBpQ', phoneNo, caseRecord.id)
                         }
-                        else if (lastBotNodeId === 'las') {
-                            await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.SOLVED);
-                        }
+                        // else if (lastBotNodeId === 'las') {
+                        //     await this.chatService.  x(caseRecord.id, Status.SOLVED);
+                        // }
                         else if (lastBotNodeId === 'main_question-FyKfq') {
                             await this.botService.botSendByNodeId('main_buttons-JYKle', phoneNo, caseRecord.id)
                         }
@@ -805,9 +797,9 @@ export class CustomerService {
             await this.chatService.triggerStatusUpdateBot(activeCase.id, Status.INITIATED, 'BOT')
             await this.botService.sendWelcomeMsg(activeCase.customer.phoneNo, activeCase.id);
         }
-        if (activeCase && activeCase.lastBotNodeId === 'main_message-ILtoz') {
-            await this.prisma.case.update({ where: { id: activeCase.id }, data: { status: Status.SOLVED } })
-        }
+        // if (activeCase && activeCase.lastBotNodeId === 'main_message-ILtoz') {
+        // await this.prisma.case.update({ where: { id: activeCase.id }, data: { status: Status.SOLVED } })
+        // }
 
         if (activeCase) {
             const newCase = await this.prisma.case.findUnique({
@@ -1227,6 +1219,9 @@ export class CustomerService {
             location: t.location
         }))
         return safeData;
+    }
+    async syncMachine() {
+        await this.gg_backend_service.getAllMachinesFromGG();
     }
 
 
