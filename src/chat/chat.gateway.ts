@@ -723,7 +723,7 @@ export class ChatGateway
       handlerInfo = dCase.user.firstName;
     }
     else {
-      handlerInfo = dCase.assignedTo
+      handlerInfo = dCase.assignedTo;
     }
 
     const chatInfo =
@@ -1594,7 +1594,7 @@ export class ChatGateway
     }
 
     // Customer message and case is assigned to an agent -> increment
-    if (lastSender === SenderType.CUSTOMER && c.assignedTo === CaseHandler.USER) {
+    if (lastSender === SenderType.CUSTOMER) {
       // unread can be null, so handle both cases atomically
       if (c.unread === null) {
         const updated = await this.prisma.case.update({
