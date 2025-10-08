@@ -1468,7 +1468,7 @@ export class ChatGateway
       if (issue && issue.agentCalledAt && issue.userId === null) {
         handlerInfo = 'Not Assigned'
       }
-      else if (caseRecord.user && caseRecord.assignedTo === 'USER') {
+      else if (caseRecord.user) {
         handlerInfo = caseRecord.user.firstName;
       }
       else {
@@ -1593,7 +1593,7 @@ export class ChatGateway
       return 0;
     }
 
-    // Customer message and case is assigned to an agent -> increment
+
     if (lastSender === SenderType.CUSTOMER) {
       // unread can be null, so handle both cases atomically
       if (c.unread === null) {
