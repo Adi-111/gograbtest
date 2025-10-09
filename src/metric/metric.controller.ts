@@ -42,7 +42,21 @@ export class MetricController {
 
   @Get('without-agent')
   async withoutAgent(
+    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query('from') fromStr?: string,
+    @Query('to') toStr?: string,
+    @Query('mode') mode?: 'opened' | 'updated',
   ) {
-    return await this.metricService.percentResolvedWithoutAgent()
+    // Default to last 30 days if not provided
+    const { from, to } = resolveRange(preset, fromStr, toStr);
+
+
+
+    return await this.metricService.percentResolvedWithoutAgent({
+      from,
+      to,
+      mode: mode || 'opened',
+    });
+
   }
 }

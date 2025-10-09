@@ -637,7 +637,7 @@ export class ChatGateway
           isActive: false,
           closedAt: new Date(),
           endTimeAt: new Date(),
-
+          userId,
           // domain fields
           machine_id: machineDetails.machine.machine_id ?? null,
           machineName: machineDetails?.machine?.machine_name ?? null,

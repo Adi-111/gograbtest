@@ -28,22 +28,33 @@ export class MetricService {
   ) { }
 
 
-  async percentResolvedWithoutAgent() {
+  async percentResolvedWithoutAgent(params: {
+    from: Date;
+    to: Date;
+    mode?: "opened" | "updated";
+  }) {
+    const { from, to, mode = "opened" } = params;
 
-    //all solved issues
+    // Filter dimension - same pattern as issueTaggedPerMachineInRange
+    const timeFilter =
+      mode === "updated"
+        ? { updatedAt: { gte: from, lt: to } }
+        : { openedAt: { gte: from, lt: to } };
+
+    // All solved issues within the time range
     const issues = await this.prisma.issueEvent.findMany({
       where: {
-        status: "CLOSED"
+        status: "CLOSED",
+        ...timeFilter,
       },
       select: {
         userId: true,
         agentCalledAt: true,
         agentLinkedAt: true
-
       }
     });
 
-    // 2) Aggregate in JS
+    // Aggregate in JS
     const totalResolved = issues.length;
     if (totalResolved === 0) {
       return { totalResolved: 0, resolvedWithoutAgent: 0, percentage: 0 };
