@@ -8,6 +8,15 @@ type IssueSummary = {
   active: number;
   byType: Record<IssueType, number>;
   latestIssue: { id: number; at: Date } | null;
+  refundStats: {
+    manualStats: {
+      manualRefundCount: number;
+      totalRefundAmount: number;
+    }
+    autoStats: {
+      autoRefundCount: number;
+    }
+  };
 };
 
 
@@ -81,6 +90,9 @@ export class MetricService {
         isActive: true,
         openedAt: true,
         updatedAt: true,
+        refundMode: true,
+        refundAmountMinor: true
+
       },
       orderBy: [{ machineName: "asc" }, { updatedAt: "desc" }],
     });
@@ -100,6 +112,15 @@ export class MetricService {
           active: 0,
           byType,
           latestIssue: null,
+          refundStats: {
+            manualStats: {
+              manualRefundCount: 0,
+              totalRefundAmount: 0
+            },
+            autoStats: {
+              autoRefundCount: 0
+            }
+          }
         };
         map.set(name, entry);
       }
@@ -107,6 +128,18 @@ export class MetricService {
       entry.total += 1;
       if (row.isActive) entry.active += 1;
       entry.byType[row.issueType] = (entry.byType[row.issueType] ?? 0) + 1;
+
+      // Track manual refunds and amounts
+      if (row.issueType === 'REFUND') {
+        if (row.refundMode === 'MANUAL') {
+          entry.refundStats.manualStats.manualRefundCount += 1;
+          entry.refundStats.manualStats.totalRefundAmount += row.refundAmountMinor ?? 0;
+        }
+        else if (row.refundMode === 'AUTO') {
+          entry.refundStats.autoStats.autoRefundCount += 1;
+        }
+      }
+
 
       const ts = row.updatedAt ?? row.openedAt;
       if (!entry.latestIssue || ts > entry.latestIssue.at) {
