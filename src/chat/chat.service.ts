@@ -723,7 +723,8 @@ export class ChatService {
             select: {
                 utr: true,
                 caseId: true,
-                id: true
+                id: true,
+                orderTime: true
             }
         })
 

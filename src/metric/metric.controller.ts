@@ -39,6 +39,23 @@ export class MetricController {
     return { range: { from, to, preset: preset ?? "month", mode: mode ?? "opened" }, data };
   }
 
+  @Get('msg-summary')
+  async msgSummary(
+    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query('from') fromStr?: string,
+    @Query('to') toStr?: string,
+    @Query('mode') mode?: 'opened' | 'updated',
+  ) {
+    const { from, to } = resolveRange(preset, fromStr, toStr);
+
+    return await this.metricService.UserMessageSummary({
+      from,
+      to,
+      mode: mode || 'opened',
+    });
+
+  }
+
 
   @Get('without-agent')
   async withoutAgent(

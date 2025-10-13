@@ -73,6 +73,25 @@ export class MetricService {
     };
   }
 
+  async UserMessageSummary(params: {
+    from: Date;
+    to: Date;
+    mode?: "opened" | "updated"; // how to include issues in the window
+  }) {
+    const { from, to, mode = "opened" } = params;
+
+    // Filter dimension
+
+    const summaries = await this.prisma.dailyUserMessageSummary.findMany({
+      where: {
+        date: { gte: from, lte: to },
+      },
+      include: { user: true },
+      orderBy: { date: 'desc' },
+    });
+    return summaries
+  }
+
 
 
 
@@ -81,7 +100,7 @@ export class MetricService {
     to: Date;
     mode?: "opened" | "updated"; // how to include issues in the window
   }): Promise<IssueSummary[]> {
-    const { from, to, mode = "opened" } = params;
+    const { from, to, mode } = params;
 
     // Filter dimension
     const timeFilter =
