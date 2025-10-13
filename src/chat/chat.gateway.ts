@@ -690,8 +690,7 @@ export class ChatGateway
     const updatedIssueEvents = await this.prisma.issueEvent.findMany({
       where: {
         id: caseId,
-        status: 'CLOSED',
-        refundMode: 'MANUAL'
+        status: 'CLOSED'
       }
     })
 

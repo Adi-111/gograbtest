@@ -710,7 +710,9 @@ export class ChatService {
         }
     }
 
-    async utrInfo(caseId: number) {
+
+
+    async utr(caseId: number) {
         const utrIds = await this.prisma.issueEvent.findMany({
             where: {
                 caseId,

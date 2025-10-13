@@ -30,7 +30,7 @@ export class ChatController {
 
     @Get('utr/:caseId')
     async getAllUtr(@Param('caseId', ParseIntPipe) caseId: number) {
-        return await this.chatService.utrInfo(caseId)
+        return await this.chatService.utr(caseId)
     }
 
     @Get('machineDetails')

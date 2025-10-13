@@ -38,6 +38,8 @@ model Machine {
 }
 
 
+
+
 model Bot {
   id        Int       @id @default(autoincrement())
   name      String    @default("ChatBot")
@@ -46,6 +48,7 @@ model Bot {
   updatedAt DateTime  @updatedAt
   Case      Case[]
 }
+
 
 enum ReplyType {
   InteractiveList
@@ -91,11 +94,45 @@ model User {
   cases          Case[]
   tags           Tag[]            @relation("UserTags")
   notes          Note[]
-  statusEvent    StatusEvent[]
+  statusEvent    StatusEvent[] 
   failedMsgEvent FailedMsgEvent[]
+  dailyUserMessageSummary DailyUserMessageSummary[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 }
+
+model DailyUserMessageSummary {
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  date            DateTime  @db.Date
+
+  // Message references
+  firstMessageId  Int?
+  lastMessageId   Int?
+
+  // Direct timestamp snapshots (redundant but crucial for analytics)
+  firstTimestamp  DateTime?
+  lastTimestamp   DateTime?
+
+  // Optional analytics metrics
+  totalMessages   Int        @default(0)
+  activeDuration  Int?       // minutes between first & last message
+  firstText       String?    @db.Text  // optional: store first message text snapshot
+  lastText        String?    @db.Text  // optional: store last message text snapshot
+
+  // Relations
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstMessage    Message?   @relation("SummaryFirstMessage", fields: [firstMessageId], references: [id])
+  lastMessage     Message?   @relation("SummaryLastMessage", fields: [lastMessageId], references: [id])
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@unique([userId, date])
+  @@index([date])
+  @@index([userId])
+}
+
 
 model Session {
   id        Int      @id @default(autoincrement())
@@ -174,6 +211,7 @@ enum RefundMode {
   MANUAL
 }
 
+
 model IssueEvent {
   id           Int               @id @default(autoincrement())
   caseId       Int
@@ -196,11 +234,14 @@ model IssueEvent {
   utr String?
   falsePositive  Boolean?  
   coil Int?
-
+  orderTime String?
+  
   
 
   
-  refundAmountMinor Int?                           // NEW; required only when refundMode = MANUAL
+
+  
+  refundAmountMinor Int?   
   
 
   resolutionNotes   String?                         // NEW (formerly issueDetails)
@@ -305,6 +346,9 @@ model Message {
   whatsAppCustomerId Int?
   issueEvent         IssueEvent?       @relation(fields: [issueEventId], references: [id])
   issueEventId       Int?
+
+  firstInSummaries   DailyUserMessageSummary[] @relation("SummaryFirstMessage")
+  lastInSummaries    DailyUserMessageSummary[] @relation("SummaryLastMessage")
 
   @@index([senderType])
   @@index([recipient])

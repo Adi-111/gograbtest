@@ -5,7 +5,7 @@ import * as newrelic from 'newrelic';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CustomerService } from 'src/customer/customer.service';
 import { ChatService } from 'src/chat/chat.service';
-import { Status } from '@prisma/client';
+
 import { ProductDto } from 'src/customer/gg-backend/dto/products.dto';
 
 @Injectable()
@@ -29,6 +29,68 @@ export class CronService {
     async handleMachineCron() {
         await this.cusService.syncMachine()
     }
+
+
+    @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+    async handleDailyUserSummaries() {
+        this.logger.log('⏳ Starting DailyUserMessageSummary cron...');
+
+        const startOfYesterday = new Date();
+        startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+        startOfYesterday.setHours(0, 0, 0, 0);
+
+        const endOfYesterday = new Date(startOfYesterday);
+        endOfYesterday.setHours(23, 59, 59, 999);
+
+        const users = [{ id: 3 }, { id: 6 }, { id: 8 }];
+
+        for (const { id: userId } of users) {
+            const messages = await this.prisma.message.findMany({
+                where: {
+                    userId,
+                    timestamp: { gte: startOfYesterday, lte: endOfYesterday },
+                },
+                orderBy: { timestamp: 'asc' },
+                select: { id: true, text: true, timestamp: true },
+            });
+
+            if (!messages.length) continue;
+
+            const firstMessage = messages[0];
+            const lastMessage = messages[messages.length - 1];
+            const activeDuration =
+                (lastMessage.timestamp.getTime() - firstMessage.timestamp.getTime()) / 60000;
+
+            await this.prisma.dailyUserMessageSummary.upsert({
+                where: { userId_date: { userId, date: startOfYesterday } },
+                update: {
+                    firstMessageId: firstMessage.id,
+                    lastMessageId: lastMessage.id,
+                    firstTimestamp: firstMessage.timestamp,
+                    lastTimestamp: lastMessage.timestamp,
+                    totalMessages: messages.length,
+                    activeDuration: Math.round(activeDuration),
+                    firstText: firstMessage.text?.slice(0, 250) ?? null,
+                    lastText: lastMessage.text?.slice(0, 250) ?? null,
+                },
+                create: {
+                    userId,
+                    date: startOfYesterday,
+                    firstMessageId: firstMessage.id,
+                    lastMessageId: lastMessage.id,
+                    firstTimestamp: firstMessage.timestamp,
+                    lastTimestamp: lastMessage.timestamp,
+                    totalMessages: messages.length,
+                    activeDuration: Math.round(activeDuration),
+                    firstText: firstMessage.text?.slice(0, 250) ?? null,
+                    lastText: lastMessage.text?.slice(0, 250) ?? null,
+                },
+            });
+        }
+
+        this.logger.log(`✅ DailyUserMessageSummary updated for ${startOfYesterday.toDateString()}`);
+    }
+
 
 
 
