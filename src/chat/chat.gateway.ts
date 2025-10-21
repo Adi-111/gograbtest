@@ -137,6 +137,7 @@ export class ChatGateway
       handler?: string;
       tag?: string;
       viewMode?: 'ACTIVE' | 'ALL';
+      byUserId?: number; // 👈 added
     }
   ) {
     try {
@@ -190,6 +191,11 @@ export class ChatGateway
         });
       } else if (payload?.handler && payload.handler !== 'MY_CHATS') {
         baseWhere.assignedTo = payload.handler;
+      }
+
+      if (payload?.byUserId) {
+        baseWhere.AND = baseWhere.AND || [];
+        baseWhere.AND.push({ userId: payload.byUserId });
       }
 
       // Tags
