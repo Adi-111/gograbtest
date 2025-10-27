@@ -8,37 +8,33 @@ datasource db {
 }
 
 model Machine {
-  machine_id                       String   @id
-  machine_name                     String
-  location                         String
-  description                      String
-  rating                           String
-  machine_status                   Boolean
-  machine_type                     String
-  machine_capacity                 Int
-  total_coils                      Int
-  password                         String
-  date_created                     DateTime 
-  left_units                       Int
-  last_refill_time                 DateTime?
-  last_refill_by                   String?
-  last_refill_availability         String?
-  availability                     String?
-  last_transaction                 DateTime?
-  accumulated_downtime             String?
+  machine_id                            String    @id
+  machine_name                          String
+  location                              String
+  description                           String
+  rating                                String
+  machine_status                        Boolean
+  machine_type                          String
+  machine_capacity                      Int
+  total_coils                           Int
+  password                              String
+  date_created                          DateTime
+  left_units                            Int
+  last_refill_time                      DateTime?
+  last_refill_by                        String?
+  last_refill_availability              String?
+  availability                          String?
+  last_transaction                      DateTime?
+  accumulated_downtime                  String?
   time_difference_from_last_transaction String?
-  last_report_time                 DateTime?
-  refill_report_time_difference    String?
-  variety_score                    String?
-  latitude                         Float?
-  longitude                        Float?
-  createdAt DateTime @default(now())
-  updatedAt DateTime 
-
+  last_report_time                      DateTime?
+  refill_report_time_difference         String?
+  variety_score                         String?
+  latitude                              Float?
+  longitude                             Float?
+  createdAt                             DateTime  @default(now())
+  updatedAt                             DateTime
 }
-
-
-
 
 model Bot {
   id        Int       @id @default(autoincrement())
@@ -48,7 +44,6 @@ model Bot {
   updatedAt DateTime  @updatedAt
   Case      Case[]
 }
-
 
 enum ReplyType {
   InteractiveList
@@ -84,55 +79,54 @@ model BotReplies {
 }
 
 model User {
-  id             Int              @id @default(autoincrement())
-  firstName      String
-  lastName       String
-  email          String           @unique
-  password       String
-  sessions       Session[]
-  messages       Message[]
-  cases          Case[]
-  tags           Tag[]            @relation("UserTags")
-  notes          Note[]
-  statusEvent    StatusEvent[] 
-  failedMsgEvent FailedMsgEvent[]
+  id                      Int                       @id @default(autoincrement())
+  firstName               String
+  lastName                String
+  email                   String                    @unique
+  password                String
+  sessions                Session[]
+  messages                Message[]
+  cases                   Case[]
+  tags                    Tag[]                     @relation("UserTags")
+  notes                   Note[]
+  statusEvent             StatusEvent[]
+  failedMsgEvent          FailedMsgEvent[]
   dailyUserMessageSummary DailyUserMessageSummary[]
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
 }
 
 model DailyUserMessageSummary {
-  id              Int       @id @default(autoincrement())
-  userId          Int
-  date            DateTime  @db.Date
+  id     Int      @id @default(autoincrement())
+  userId Int
+  date   DateTime @db.Date
 
   // Message references
-  firstMessageId  Int?
-  lastMessageId   Int?
+  firstMessageId Int?
+  lastMessageId  Int?
 
   // Direct timestamp snapshots (redundant but crucial for analytics)
-  firstTimestamp  DateTime?
-  lastTimestamp   DateTime?
+  firstTimestamp DateTime?
+  lastTimestamp  DateTime?
 
   // Optional analytics metrics
-  totalMessages   Int        @default(0)
-  activeDuration  Int?       // minutes between first & last message
-  firstText       String?    @db.Text  // optional: store first message text snapshot
-  lastText        String?    @db.Text  // optional: store last message text snapshot
+  totalMessages  Int     @default(0)
+  activeDuration Int? // minutes between first & last message
+  firstText      String? @db.Text // optional: store first message text snapshot
+  lastText       String? @db.Text // optional: store last message text snapshot
 
   // Relations
-  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstMessage    Message?   @relation("SummaryFirstMessage", fields: [firstMessageId], references: [id])
-  lastMessage     Message?   @relation("SummaryLastMessage", fields: [lastMessageId], references: [id])
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstMessage Message? @relation("SummaryFirstMessage", fields: [firstMessageId], references: [id])
+  lastMessage  Message? @relation("SummaryLastMessage", fields: [lastMessageId], references: [id])
 
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([userId, date])
   @@index([date])
   @@index([userId])
 }
-
 
 model Session {
   id        Int      @id @default(autoincrement())
@@ -211,48 +205,39 @@ enum RefundMode {
   MANUAL
 }
 
-
 model IssueEvent {
-  id           Int               @id @default(autoincrement())
-  caseId       Int
-  customerId   Int
-  userId       Int?
-  
+  id         Int  @id @default(autoincrement())
+  caseId     Int
+  customerId Int
+  userId     Int?
 
   // lifecycle
-  status       IssueEventStatus  @default(OPEN)
-  isActive     Boolean           @default(true)
-  openedAt     DateTime          @default(now())
-  closedAt     DateTime?
+  status   IssueEventStatus @default(OPEN)
+  isActive Boolean          @default(true)
+  openedAt DateTime         @default(now())
+  closedAt DateTime?
 
   // domain fields
-  machine_id String?
-  machineName       String?
-  issueType         IssueType     @default(OTHER) // NEW
-  refundMode        RefundMode?                  // NEW; only when issueType = REFUND
+  machine_id  String?
+  machineName String?
+  issueType   IssueType   @default(OTHER) // NEW
+  refundMode  RefundMode? // NEW; only when issueType = REFUND
 
-  utr String?
-  falsePositive  Boolean?  
-  coil Int?
-  orderTime String?
-  
-  
+  utr           String?
+  falsePositive Boolean?
+  coil          Int?
+  orderTime     String?
 
-  
+  refundAmountMinor Int?
 
-  
-  refundAmountMinor Int?   
-  
-
-  resolutionNotes   String?                         // NEW (formerly issueDetails)
-  
+  resolutionNotes String? // NEW (formerly issueDetails)
 
   agentCalledAt DateTime?
   agentLinkedAt DateTime?
   endTimeAt     DateTime?
 
-  messages      Message[]
-  case          Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  messages Message[]
+  case     Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   created_at DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -262,17 +247,12 @@ model IssueEvent {
   @@index([issueType])
 }
 
-
-
-
-
-
 model StatusEvent {
   id             Int      @id @default(autoincrement())
   caseId         Int
   case           Case     @relation(fields: [caseId], references: [id])
-  userId        Int?
-  user           User?     @relation(fields: [userId], references: [id])
+  userId         Int?
+  user           User?    @relation(fields: [userId], references: [id])
   previousStatus Status
   newStatus      Status
   timestamp      DateTime @default(now())
@@ -347,8 +327,8 @@ model Message {
   issueEvent         IssueEvent?       @relation(fields: [issueEventId], references: [id])
   issueEventId       Int?
 
-  firstInSummaries   DailyUserMessageSummary[] @relation("SummaryFirstMessage")
-  lastInSummaries    DailyUserMessageSummary[] @relation("SummaryLastMessage")
+  firstInSummaries DailyUserMessageSummary[] @relation("SummaryFirstMessage")
+  lastInSummaries  DailyUserMessageSummary[] @relation("SummaryLastMessage")
 
   @@index([senderType])
   @@index([recipient])

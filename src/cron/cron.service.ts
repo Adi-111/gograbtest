@@ -24,25 +24,27 @@ export class CronService {
         await this.handleProductsUpdate(products);
     }
 
-
     @Cron(CronExpression.EVERY_6_HOURS)
     async handleMachineCron() {
         await this.cusService.syncMachine()
     }
 
 
-    @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+
+
+
+    @Cron(CronExpression.EVERY_6_HOURS) // NOTICE
     async handleDailyUserSummaries() {
-        this.logger.log('⏳ Starting DailyUserMessageSummary cron...');
+        this.logger.log(`⏳ Starting DailyUserMessageSummary cron... at ${CronExpression.EVERY_DAY_AT_MIDNIGHT}`);
 
         const startOfYesterday = new Date();
-        startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+        startOfYesterday.setDate(startOfYesterday.getDate());
         startOfYesterday.setHours(0, 0, 0, 0);
 
         const endOfYesterday = new Date(startOfYesterday);
         endOfYesterday.setHours(23, 59, 59, 999);
 
-        const users = [{ id: 3 }, { id: 6 }, { id: 8 }];
+        const users = [{ id: 3 }, { id: 6 }, { id: 8 }, { id: 1 }];
 
         for (const { id: userId } of users) {
             const messages = await this.prisma.message.findMany({
@@ -58,10 +60,12 @@ export class CronService {
 
             const firstMessage = messages[0];
             const lastMessage = messages[messages.length - 1];
+
+
             const activeDuration =
                 (lastMessage.timestamp.getTime() - firstMessage.timestamp.getTime()) / 60000;
 
-            await this.prisma.dailyUserMessageSummary.upsert({
+            const Dump = await this.prisma.dailyUserMessageSummary.upsert({
                 where: { userId_date: { userId, date: startOfYesterday } },
                 update: {
                     firstMessageId: firstMessage.id,
@@ -86,6 +90,10 @@ export class CronService {
                     lastText: lastMessage.text?.slice(0, 250) ?? null,
                 },
             });
+
+            this.logger.log(`userId: ${userId} firstMessage:${JSON.stringify(firstMessage)} lastMessage:${JSON.stringify(lastMessage)} data:${JSON.stringify(Dump)}`)
+
+
         }
 
         this.logger.log(`✅ DailyUserMessageSummary updated for ${startOfYesterday.toDateString()}`);

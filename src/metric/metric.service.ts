@@ -78,7 +78,7 @@ export class MetricService {
     to: Date;
     mode?: "opened" | "updated"; // how to include issues in the window
   }) {
-    const { from, to, mode = "opened" } = params;
+    const { from, to } = params;
 
     // Filter dimension
 
@@ -89,7 +89,7 @@ export class MetricService {
       include: { user: true },
       orderBy: { date: 'desc' },
     });
-    return summaries
+    return summaries;
   }
 
 

@@ -526,6 +526,7 @@ export class CustomerService {
     async handleRefundScreenshot(url: string, phoneNo: string, caseId: number) {
 
         let vendDetails: MergedProductDetail;
+        let issueId: number | null;
         try {
             if (!caseId || !phoneNo) {
                 this.logger.error('Missing caseId or phoneNo.');
@@ -545,7 +546,7 @@ export class CustomerService {
                 return;
             }
             if (utrId) {
-                const issueId = (await this.prisma.case.findUnique({
+                issueId = (await this.prisma.case.findUnique({
                     where: {
                         id: caseId
                     },
@@ -589,6 +590,16 @@ export class CustomerService {
                 if (!vendDetails.vendItems[0] || vendDetails.vendItems[0] === null) {
                     await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
                     return
+                }
+                if (issueId) {
+                    await this.prisma.issueEvent.update({
+                        where: {
+                            id: issueId
+                        },
+                        data: {
+                            orderTime: vendDetails.vendItems[vendDetails.vendItems.length - 1].vend_time
+                        }
+                    })
                 }
                 await this.gg_backend_service.createCustomerDetails(vendDetails, caseId)
             }

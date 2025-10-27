@@ -1213,7 +1213,6 @@ export class ChatGateway
         where: {
           caseId: payload.caseId,
           status: "CLOSED",
-          refundMode: 'MANUAL'
         }
       })
       const editedEvents = events.map(el => ({
@@ -1472,6 +1471,9 @@ export class ChatGateway
       let handlerInfo = String(caseRecord.assignedTo);
       if (issue && issue.agentCalledAt && issue.userId === null) {
         handlerInfo = 'Not Assigned'
+      }
+      else if (caseRecord.assignedTo === 'BOT' && caseRecord.status === 'INITIATED') {
+        handlerInfo = caseRecord.assignedTo
       }
       else if (caseRecord.user) {
         handlerInfo = caseRecord.user.firstName;
