@@ -56,6 +56,36 @@ export class MetricController {
 
   }
 
+  @Get('slow-issues')
+  async SlowIssues(
+    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query('from') fromStr?: string,
+    @Query('to') toStr?: string,
+    @Query('mode') mode?: 'opened' | 'updated',
+  ) {
+    const { from, to } = resolveRange(preset, fromStr, toStr);
+    return await this.metricService.agentIssueClosureAnalytics({
+      from,
+      to,
+      mode: mode || 'opened',
+    });
+  }
+
+  @Get('agent-trend')
+  async agentTrendline(
+    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query('from') fromStr?: string,
+    @Query('to') toStr?: string,
+    @Query('mode') mode?: 'opened' | 'updated',
+  ) {
+    const { from, to } = resolveRange(preset, fromStr, toStr);
+    return await this.metricService.getManualRefundTrendPerAgent({
+      from,
+      to,
+      mode: mode || 'opened',
+    });
+  }
+
 
   @Get('without-agent')
   async withoutAgent(

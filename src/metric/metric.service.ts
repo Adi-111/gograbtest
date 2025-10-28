@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AgentFRTQuery, AgentFRTSummary } from './types';
 import { IssueType } from '@prisma/client';
+import { format } from 'date-fns/format';
 type IssueSummary = {
   machineName: string;
   total: number;
@@ -20,12 +21,213 @@ type IssueSummary = {
 };
 
 
+
+
 @Injectable()
 export class MetricService {
   private readonly logger = new Logger(MetricService.name);
   constructor(
     private readonly prisma: PrismaService
   ) { }
+
+
+
+
+  async agentIssueClosureAnalytics(params: {
+    from: Date;
+    to: Date;
+    mode?: "opened" | "updated";
+  }) {
+    const { from, to, mode = "opened" } = params;
+    this.logger.log(`Running agentIssueClosureAnalytics with`, params);
+
+    // 1️⃣ Time window filter (consistent with other metrics)
+    const timeFilter =
+      mode === "updated"
+        ? { updatedAt: { gte: from, lt: to } }
+        : { openedAt: { gte: from, lt: to } };
+
+    // 2️⃣ Fetch all closed issues with userId
+    const issues = await this.prisma.issueEvent.findMany({
+      where: {
+        closedAt: { not: null },
+        ...timeFilter,
+      },
+      select: {
+        id: true,
+        userId: true,
+        openedAt: true,
+        closedAt: true,
+        machineName: true,
+        issueType: true,
+      },
+    });
+
+    if (!issues.length) {
+      this.logger.log("No closed issues found in the range");
+      return { total: 0, summary: [] };
+    }
+
+    // 3️⃣ Compute durations
+    const enriched = issues.map((i) => {
+      const durationMs =
+        new Date(i.closedAt!).getTime() - new Date(i.openedAt).getTime();
+      const durationHrs = durationMs / (1000 * 60 * 60);
+      return {
+        ...i,
+        durationHrs,
+        slow: durationHrs > 4,
+      };
+    });
+
+    // 4️⃣ Fetch all users in one query
+    const uniqueUserIds = Array.from(
+      new Set(enriched.map((i) => i.userId).filter(Boolean))
+    );
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: uniqueUserIds } },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+    const userMap = new Map(
+      users.map((u) => [
+        u.id,
+        `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || "Unknown",
+      ])
+    );
+
+    // 5️⃣ Group issues by user
+    const grouped = new Map<
+      number,
+      {
+        agentName: string;
+        totalClosed: number;
+        closedAfter4Hrs: number;
+        totalDurationHrs: number;
+      }
+    >();
+
+    for (const issue of enriched) {
+      const uid = issue.userId ?? 0;
+      const agentName = userMap.get(uid) || "Unassigned";
+
+      if (!grouped.has(uid)) {
+        grouped.set(uid, {
+          agentName,
+          totalClosed: 0,
+          closedAfter4Hrs: 0,
+          totalDurationHrs: 0,
+        });
+      }
+
+      const entry = grouped.get(uid)!;
+      entry.totalClosed += 1;
+      entry.totalDurationHrs += issue.durationHrs;
+      if (issue.slow) entry.closedAfter4Hrs += 1;
+    }
+
+    // 6️⃣ Compute aggregates
+    const summary = Array.from(grouped.entries()).map(([userId, g]) => {
+      const avg = g.totalClosed ? g.totalDurationHrs / g.totalClosed : 0;
+      const slowRate = g.totalClosed ? (g.closedAfter4Hrs / g.totalClosed) * 100 : 0;
+      return {
+        userId,
+        agentName: g.agentName,
+        totalClosed: g.totalClosed,
+        closedAfter4Hrs: g.closedAfter4Hrs,
+        avgClosureTimeHrs: Number(avg.toFixed(2)),
+        slowRate: Number(slowRate.toFixed(2)),
+      };
+    });
+
+    summary.sort((a, b) => b.slowRate - a.slowRate);
+
+    this.logger.log(
+      `✅ Agent closure analytics generated: ${summary.length} agents`
+    );
+
+    return { total: issues.length, summary };
+  }
+
+
+
+
+
+  async getManualRefundTrendPerAgent(params: {
+    from: Date;
+    to: Date;
+    mode?: 'opened' | 'updated';
+  }) {
+    const { from, to, mode = 'opened' } = params;
+
+    // 1️⃣ Time filter (like other metrics)
+    const timeFilter =
+      mode === 'updated'
+        ? { updatedAt: { gte: from, lt: to } }
+        : { openedAt: { gte: from, lt: to } };
+
+    // 2️⃣ Fetch manual refund issues with relevant data
+    const issues = await this.prisma.issueEvent.findMany({
+      where: {
+        issueType: 'REFUND',
+        refundMode: 'MANUAL',
+        closedAt: { not: null },
+        userId: { not: null },
+        ...timeFilter,
+      },
+
+
+      orderBy: { closedAt: 'asc' },
+    });
+
+    // 3️⃣ Group by date + agent with aggregated info
+    const grouped: Record<string, Record<number, { count: number; amount: number }>> = {};
+
+    for (const issue of issues) {
+      const dateKey = format(new Date(issue.closedAt!), 'yyyy-MM-dd');
+      const uid = issue.userId!;
+      if (!grouped[dateKey]) grouped[dateKey] = {};
+      if (!grouped[dateKey][uid]) grouped[dateKey][uid] = { count: 0, amount: 0 };
+      grouped[dateKey][uid].count += 1;
+      grouped[dateKey][uid].amount += issue.refundAmountMinor ?? 0;
+    }
+
+    const dates = Object.keys(grouped).sort();
+    const agentIds = Array.from(
+      new Set(dates.flatMap((d) => Object.keys(grouped[d]).map(Number))),
+    );
+
+    // 4️⃣ Build dataset with hover info (custom object per point)
+    const datasets = agentIds.map((agentId) => {
+      const label =
+        issues.find((i) => i.userId === agentId)?.userId ||
+        `Agent#${agentId}`;
+
+      return {
+        label,
+        data: dates.map((d) => {
+          const val = grouped[d][agentId];
+          return {
+            x: d,
+            y: val ? val.count : 0,
+            refundAmount: val ? val.amount : 0,
+            tooltip: val
+              ? `Refunds: ${val.count} | Amount: ₹${(val.amount / 100).toFixed(2)}`
+              : 'No data',
+          };
+        }),
+        borderWidth: 2,
+        fill: false,
+      };
+    });
+
+    return {
+      labels: dates,
+      datasets,
+    };
+  }
+
+
+
 
 
   async percentResolvedWithoutAgent(params: {
