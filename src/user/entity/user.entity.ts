@@ -1,5 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { User } from "@prisma/client";
+import { User, UserRole } from "@prisma/client";
 import { Exclude } from "class-transformer";
 
 export class UserEntity implements User {
@@ -35,6 +35,9 @@ export class UserEntity implements User {
         description: "Optional profile image URL for the user",
     })
     profileImageUrl: string | "";
+
+    @ApiProperty()
+    role: UserRole;
 
     @Exclude()
     password: string;

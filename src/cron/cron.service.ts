@@ -8,6 +8,12 @@ import { ChatService } from 'src/chat/chat.service';
 
 import { ProductDto } from 'src/customer/gg-backend/dto/products.dto';
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // +05:30
+
+// Convert between UTC <-> IST using fixed offset (IST has no DST)
+const toIST = (d: Date) => new Date(d.getTime() + IST_OFFSET_MS);
+const fromIST = (d: Date) => new Date(d.getTime() - IST_OFFSET_MS);
+
 @Injectable()
 export class CronService {
     private readonly logger = new Logger(CronService.name)
@@ -33,16 +39,15 @@ export class CronService {
 
 
 
-    @Cron(CronExpression.EVERY_6_HOURS) // NOTICE
+
+    @Cron(CronExpression.EVERY_HOUR) // runs 4x/day; window logic decides which "business day" to summarize
     async handleDailyUserSummaries() {
-        this.logger.log(`⏳ Starting DailyUserMessageSummary cron... at ${CronExpression.EVERY_DAY_AT_MIDNIGHT}`);
 
-        const startOfYesterday = new Date();
-        startOfYesterday.setDate(startOfYesterday.getDate());
-        startOfYesterday.setHours(0, 0, 0, 0);
+        const { startUtc, endUtc, dateKeyUtc, startIST, endIST } = this.getIST4amWindow();
 
-        const endOfYesterday = new Date(startOfYesterday);
-        endOfYesterday.setHours(23, 59, 59, 999);
+        this.logger.log(
+            `⏳ DailyUserMessageSummary window IST: ${startIST.toISOString()} → ${endIST.toISOString()} | UTC: ${startUtc.toISOString()} → ${endUtc.toISOString()}`
+        );
 
         const users = [{ id: 3 }, { id: 6 }, { id: 8 }, { id: 1 }];
 
@@ -50,7 +55,7 @@ export class CronService {
             const messages = await this.prisma.message.findMany({
                 where: {
                     userId,
-                    timestamp: { gte: startOfYesterday, lte: endOfYesterday },
+                    timestamp: { gte: startUtc, lte: endUtc }, // 4AM IST → 4AM IST window (in UTC)
                 },
                 orderBy: { timestamp: 'asc' },
                 select: { id: true, text: true, timestamp: true },
@@ -61,42 +66,41 @@ export class CronService {
             const firstMessage = messages[0];
             const lastMessage = messages[messages.length - 1];
 
-
             const activeDuration =
-                (lastMessage.timestamp.getTime() - firstMessage.timestamp.getTime()) / 60000;
+                Math.round((lastMessage.timestamp.getTime() - firstMessage.timestamp.getTime()) / 60000);
 
-            const Dump = await this.prisma.dailyUserMessageSummary.upsert({
-                where: { userId_date: { userId, date: startOfYesterday } },
+            const dump = await this.prisma.dailyUserMessageSummary.upsert({
+                where: { userId_date: { userId, date: dateKeyUtc } }, // unique on (userId, date)
                 update: {
                     firstMessageId: firstMessage.id,
                     lastMessageId: lastMessage.id,
                     firstTimestamp: firstMessage.timestamp,
                     lastTimestamp: lastMessage.timestamp,
                     totalMessages: messages.length,
-                    activeDuration: Math.round(activeDuration),
+                    activeDuration,
                     firstText: firstMessage.text?.slice(0, 250) ?? null,
                     lastText: lastMessage.text?.slice(0, 250) ?? null,
                 },
                 create: {
                     userId,
-                    date: startOfYesterday,
+                    date: dateKeyUtc, // the 4AM-IST anchor in UTC
                     firstMessageId: firstMessage.id,
                     lastMessageId: lastMessage.id,
                     firstTimestamp: firstMessage.timestamp,
                     lastTimestamp: lastMessage.timestamp,
                     totalMessages: messages.length,
-                    activeDuration: Math.round(activeDuration),
+                    activeDuration,
                     firstText: firstMessage.text?.slice(0, 250) ?? null,
                     lastText: lastMessage.text?.slice(0, 250) ?? null,
                 },
             });
 
-            this.logger.log(`userId: ${userId} firstMessage:${JSON.stringify(firstMessage)} lastMessage:${JSON.stringify(lastMessage)} data:${JSON.stringify(Dump)}`)
-
-
+            this.logger.log(
+                `✅ userId=${userId} summarized for business day starting (IST) ${startIST.toDateString()} | upsertId=${dump?.id ?? '—'}`
+            );
         }
 
-        this.logger.log(`✅ DailyUserMessageSummary updated for ${startOfYesterday.toDateString()}`);
+        this.logger.log(`✅ DailyUserMessageSummary complete for business day starting (IST) ${startIST.toDateString()}`);
     }
 
 
@@ -108,6 +112,44 @@ export class CronService {
         this.recordSystemMetrics();
         this.logger.log(`new relic collection ended at ${new Date()}`)
     }
+
+
+
+    getIST4amWindow() {
+        const nowIST = toIST(new Date());
+
+
+
+        this.logger.log(`checking for date : ${nowIST.getDate()}`);
+
+        // Start at 04:00 IST
+        const startIST = new Date(nowIST.setHours(0));
+        startIST.setHours(4, 0, 0, 0);
+
+        // End = next day 03:59:59.999 IST
+        const endIST = new Date(startIST);
+        endIST.setDate(endIST.getDate() + 1);
+        endIST.setMilliseconds(endIST.getMilliseconds() - 1);
+
+        // Convert to UTC but shift ahead by +9h 30m
+        const offsetMs = 9.5 * 60 * 60 * 1000; // +9 hours 30 minutes
+        const startUtc = new Date(fromIST(startIST).getTime() + offsetMs);
+        const endUtc = new Date(fromIST(endIST).getTime() + offsetMs);
+
+        const titleDateIST = new Date(startIST);
+        titleDateIST.setDate(titleDateIST.getDate() + 1);
+
+        return {
+            startUtc,
+            endUtc,
+            dateKeyUtc: startUtc,
+            startIST,
+            endIST,
+            titleDateIST
+        };
+    }
+
+
 
 
     // @Cron(CronExpression.EVERY_10_MINUTES) // Runs every 10 min.
@@ -158,6 +200,7 @@ export class CronService {
     /**
     * Records detailed system and process metrics to New Relic using a custom event.
     */
+
     recordSystemMetrics() {
 
         // Safely use internal method with `as any`

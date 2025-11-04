@@ -1,8 +1,9 @@
-import { Controller, Get, Param, ParseIntPipe } from "@nestjs/common";
+import { Controller, Get, Param, ParseIntPipe, Query } from "@nestjs/common";
 import { ChatService } from "./chat.service";
 import { ChatEntity } from "./entity/chat.entity";
 import { ApiCreatedResponse, ApiResponseProperty } from "@nestjs/swagger";
 import { MachineDetailsDto } from "./dto/MachineDetails.dto";
+import { Status } from "@prisma/client";
 
 @Controller('chat')
 export class ChatController {
@@ -10,6 +11,32 @@ export class ChatController {
         private chatService: ChatService,
 
     ) { }
+
+
+    @Get('list')
+    async getChatList(
+        @Query('page') page?: number,
+        @Query('limit') limit?: number,
+        @Query('search') search?: string,
+        @Query('status') status?: Status | 'EXPIRED' | 'UNREAD' | '',
+        @Query('handler') handler?: string,
+        @Query('tag') tag?: string,
+        @Query('viewMode') viewMode?: 'ACTIVE' | 'ALL',
+        @Query('byUserId') byUserId?: number,
+        @Query('userId') userId?: number, // optional if you pass logged-in userId
+    ) {
+        return this.chatService.getChatList({
+            page,
+            limit,
+            search,
+            status,
+            handler,
+            tag,
+            viewMode,
+            byUserId,
+            userId,
+        });
+    }
 
     @Get('one/:id')
     async getCaseMessages(@Param('id', ParseIntPipe) id: number) {

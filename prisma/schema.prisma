@@ -77,11 +77,10 @@ model BotReplies {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 }
-
-
 enum UserRole {
-  ADMIN
-  AGENT
+  Admin
+  Agent
+  Unknown
 }
 
 model User {
@@ -90,14 +89,6 @@ model User {
   lastName                String
   email                   String                    @unique
   password                String
-
-  // ✅ Added Role
-  role                    UserRole                   @default(AGENT)
-
-  // ✅ Added Socket Responsiveness fields
-  isOnline                Boolean                    @default(false)
-  lastActiveAt            DateTime?                  // updated via websocket ping
-
   sessions                Session[]
   messages                Message[]
   cases                   Case[]
@@ -105,8 +96,8 @@ model User {
   notes                   Note[]
   statusEvent             StatusEvent[]
   failedMsgEvent          FailedMsgEvent[]
+  role      UserRole?  @default(Agent)
   dailyUserMessageSummary DailyUserMessageSummary[]
-
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
 }
@@ -182,6 +173,7 @@ model Case {
   timer          DateTime?
   tags           Tag[]            @relation("CaseTags")
   lastBotNodeId  String?
+  lastMessageAt  DateTime?
   notes          Note[]
   meta           Json?
   statusEvent    StatusEvent[]

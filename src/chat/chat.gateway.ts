@@ -150,6 +150,9 @@ export class ChatGateway
       // Build base filters
       const baseWhere: any = {};
 
+
+
+
       // Search (customer name or phone)
       if (payload?.search) {
         baseWhere.OR = [
@@ -207,13 +210,14 @@ export class ChatGateway
         };
       }
 
+
       // -------- counts (no heavy fetch) --------
       const [filteredCount, unreadCaseCount, unreadAgg] = await this.prisma.$transaction([
         this.prisma.case.count({ where: baseWhere }),
         this.prisma.case.count({ where: { ...baseWhere, unread: { gt: 0 } } }),
         this.prisma.case.aggregate({
           where: baseWhere,
-          _sum: { unread: true }, // ignores nulls; returns null if none
+          _sum: { unread: true },
         }),
       ]);
 
@@ -230,11 +234,32 @@ export class ChatGateway
             orderBy: { timestamp: 'desc' },
             take: 2,
           },
+          issueEvents: {
+            select: { closedAt: true },
+            orderBy: { closedAt: 'desc' },
+            take: 1,
+          },
         },
         orderBy: {
-          updatedAt: 'desc',
-        },
+          lastMessageAt: 'desc'
+        }
       });
+      paginatedCases.sort((a, b) => {
+        // If both cases are solved, sort by closedAt descending
+        if (a.status === 'SOLVED' && b.status === 'SOLVED') {
+          const aClosed = a.issueEvents[0]?.closedAt ? new Date(a.issueEvents[0].closedAt).getTime() : 0;
+          const bClosed = b.issueEvents[0]?.closedAt ? new Date(b.issueEvents[0].closedAt).getTime() : 0;
+          return bClosed - aClosed;
+        }
+
+        // // If only one is solved, keep solved ones on top (optional)
+        // if (a.status === 'SOLVED' && b.status !== 'SOLVED') return -1;
+        // if (a.status !== 'SOLVED' && b.status === 'SOLVED') return 1;
+
+        // For all other cases, keep original order
+        return 0;
+      });
+
 
       // If status is EXPIRED, apply additional filtering for last message sender
       let finalCases = paginatedCases;
@@ -250,11 +275,6 @@ export class ChatGateway
             Status.SOLVED,
             Status.UNSOLVED
           ].includes(c.status);
-
-          const lastMessage = c.messages?.[0];
-          // const notUserMsg = !lastMessage || lastMessage.senderType !== 'USER';
-
-          // return validStatus && notUserMsg;
           return validStatus;
         });
         const cases = await this.prisma.case.findMany({
@@ -270,7 +290,6 @@ export class ChatGateway
             userId: true,
             unread: true,
             customerId: true,
-            // pull the latest message only
             messages: {
               orderBy: { timestamp: "desc" },
               take: 1,
@@ -282,11 +301,12 @@ export class ChatGateway
             },
 
           },
-          orderBy: { updatedAt: "desc" },
+          orderBy: { lastMessageAt: "desc" },
         });
 
         adjustedFilteredCount = cases.length
       }
+
 
 
 
@@ -663,11 +683,12 @@ export class ChatGateway
         data: {
           status, // expects Case.status to be the same `Status` enum you passed
           // Optionally unlink the currentIssueId since it's closed:
-          user: {
-            connect: {
-              id: userId
-            }
-          },
+          // direct solving without messaging
+          // user: {
+          //   connect: {
+          //     id: userId
+          //   }
+          // },
           currentIssueId: null,
           updatedAt: new Date(),
         },
@@ -695,9 +716,10 @@ export class ChatGateway
     });
     const updatedIssueEvents = await this.prisma.issueEvent.findMany({
       where: {
-        id: caseId,
-        status: 'CLOSED'
-      }
+        caseId,
+        status: 'CLOSED',
+      },
+      orderBy: { closedAt: 'asc' }
     })
 
 

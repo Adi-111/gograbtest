@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Session, User } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { UserRole } from '@prisma/client';
 
 export class AuthEntity {
     constructor(partial: Partial<AuthEntity>) {
@@ -12,6 +11,6 @@ export class AuthEntity {
         example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
     })
     accessToken: string;
-
+    role: UserRole;
     userId: number;
 }

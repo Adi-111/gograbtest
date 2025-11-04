@@ -28,6 +28,196 @@ export class ChatService {
         this.chatGateway.broadcastNewCase(room);
     }
 
+    async getChatList(
+        payload?: {
+            page?: number;
+            limit?: number;
+            search?: string;
+            status?: Status | 'EXPIRED' | 'UNREAD' | '';
+            handler?: string;
+            tag?: string;
+            viewMode?: 'ACTIVE' | 'ALL';
+            byUserId?: number; // 👈 added
+            userId: number
+        }
+    ) {
+        try {
+            const page = payload?.page && payload.page > 0 ? payload.page : 1;
+            const limit = payload?.limit ?? 50;
+            const skip = (page - 1) * limit;
+
+            this.logger.log(`Received chatList request: payload=${JSON.stringify(payload)}`);
+
+            // Build base filters
+            const baseWhere: any = {};
+
+
+
+
+            // Search (customer name or phone)
+            if (payload?.search) {
+                baseWhere.OR = [
+                    { customer: { name: { contains: payload.search, mode: 'insensitive' } } },
+                    { customer: { phoneNo: { contains: payload.search } } },
+                ];
+            }
+
+            // Status or EXPIRED
+            if (payload?.status === 'EXPIRED') {
+                baseWhere.AND = [
+                    { timer: { lt: new Date() } },
+                    { status: { not: Status.SOLVED } },
+                ];
+            } else if (payload?.status === 'UNREAD') {
+                baseWhere.AND = [
+                    { unread: { gt: 0 } },
+                    { status: { not: Status.SOLVED } },
+                ];
+            } else if (payload?.status) {
+                baseWhere.status = payload.status;
+            } else if (payload?.viewMode === 'ACTIVE') {
+                baseWhere.status = {
+                    in: [
+                        Status.INITIATED,
+                        Status.PROCESSING,
+                        Status.ASSIGNED,
+                        Status.BOT_HANDLING,
+                    ],
+                };
+            }
+
+            // Handler
+            if (payload?.handler === 'MY_CHATS' && payload.userId) {
+                baseWhere.AND = baseWhere.AND || [];
+                baseWhere.AND.push({
+                    assignedTo: 'USER',
+                    userId: payload.userId,
+                });
+            } else if (payload?.handler && payload.handler !== 'MY_CHATS') {
+                baseWhere.assignedTo = payload.handler;
+            }
+
+            if (payload?.byUserId) {
+                baseWhere.AND = baseWhere.AND || [];
+                baseWhere.AND.push({ userId: payload.byUserId });
+            }
+
+            // Tags
+            if (payload?.tag) {
+                baseWhere.tags = {
+                    some: {
+                        text: { contains: payload.tag, mode: 'insensitive' },
+                    },
+                };
+            }
+
+
+            // -------- counts (no heavy fetch) --------
+            const [filteredCount, unreadCaseCount, unreadAgg] = await this.prisma.$transaction([
+                this.prisma.case.count({ where: baseWhere }),
+                this.prisma.case.count({ where: { ...baseWhere, unread: { gt: 0 } } }),
+                this.prisma.case.aggregate({
+                    where: baseWhere,
+                    _sum: { unread: true },
+                }),
+            ]);
+
+            // Fetch paginated cases
+            const paginatedCases = await this.prisma.case.findMany({
+                where: baseWhere,
+                skip,
+                take: Number(limit),
+                include: {
+                    tags: true,
+                    customer: true,
+                    user: true,
+                    messages: {
+                        orderBy: { timestamp: 'desc' },
+                        take: 2,
+                    },
+                    issueEvents: {
+                        select: { closedAt: true },
+                        orderBy: { closedAt: 'desc' },
+                        take: 1,
+                    },
+                },
+                orderBy: {
+                    updatedAt: 'desc'
+                }
+            });
+            paginatedCases.sort((a, b) => {
+                // If both cases are solved, sort by closedAt descending
+                if (a.status === 'SOLVED' && b.status === 'SOLVED') {
+                    const aClosed = a.issueEvents[0]?.closedAt ? new Date(a.issueEvents[0].closedAt).getTime() : 0;
+                    const bClosed = b.issueEvents[0]?.closedAt ? new Date(b.issueEvents[0].closedAt).getTime() : 0;
+                    return bClosed - aClosed;
+                }
+                return 0;
+            });
+
+
+            // If status is EXPIRED, apply additional filtering for last message sender
+            let finalCases = paginatedCases;
+            let adjustedFilteredCount = filteredCount;
+
+            if (payload?.status === 'EXPIRED') {
+                finalCases = paginatedCases.filter((c) => {
+                    const validStatus = [
+                        Status.ASSIGNED,
+                        Status.BOT_HANDLING,
+                        Status.INITIATED,
+                        Status.PROCESSING,
+                        Status.SOLVED,
+                        Status.UNSOLVED
+                    ].includes(c.status);
+                    return validStatus;
+                });
+                const cases = await this.prisma.case.findMany({
+                    where: {
+                        ...baseWhere
+                    },
+                    select: {
+                        id: true,
+                        status: true,
+                        timer: true,
+                        updatedAt: true,
+                        assignedTo: true,
+                        userId: true,
+                        unread: true,
+                        customerId: true,
+                        messages: {
+                            orderBy: { timestamp: "desc" },
+                            take: 1,
+                            select: {
+                                id: true,
+                                senderType: true,
+                                timestamp: true,
+                            },
+                        },
+
+                    },
+                    orderBy: { updatedAt: "desc" },
+                });
+
+                adjustedFilteredCount = cases.length
+            }
+
+
+
+            return {
+                currentPage: page,
+                totalPages: Math.ceil(adjustedFilteredCount / limit),
+                totalCount: adjustedFilteredCount,
+                unreadCaseCount,
+                unreadSum: unreadAgg._sum.unread ?? 0,
+                cases: finalCases,
+            };
+        } catch (error) {
+            this.logger.error('Error fetching chat list', error);
+            throw error;
+        }
+    }
+
 
     async getAllMessages() {
         try {
@@ -320,9 +510,12 @@ export class ChatService {
 
     private async notifyClients(message: ChatEntity) {
         this.logger.log(message.type);
-        const caseRecord = await this.prisma.case.findUnique({
+        const caseRecord = await this.prisma.case.update({
             where: {
                 id: message.caseId
+            },
+            data: {
+                lastMessageAt: new Date()
             },
             include: {
                 customer: true

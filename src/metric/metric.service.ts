@@ -211,7 +211,7 @@ export class MetricService {
             y: val ? val.count : 0,
             refundAmount: val ? val.amount : 0,
             tooltip: val
-              ? `Refunds: ${val.count} | Amount: ₹${(val.amount / 100).toFixed(2)}`
+              ? `Refunds: ${val.count} | Amount: ₹${(val.amount ).toFixed(2)}`
               : 'No data',
           };
         }),

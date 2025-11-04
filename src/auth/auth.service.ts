@@ -41,6 +41,7 @@ export class AuthService {
                 password: true,  // Ensure password is selected
                 createdAt: true,
                 updatedAt: true,
+                role: true
             },
         });
 
@@ -117,7 +118,7 @@ export class AuthService {
         // Generate JWT token
         const accessToken = this.generateToken(user.id);
 
-        return { accessToken, userId: user.id };
+        return { accessToken, userId: user.id, role: user.role };
     }
 
     /**
@@ -137,7 +138,7 @@ export class AuthService {
         const accessToken = this.generateToken(user.id);
 
         // Create a session in the database
-        const session = await this.prisma.session.create({
+        await this.prisma.session.create({
             data: {
                 userId: user.id,
                 token: accessToken,
@@ -150,7 +151,8 @@ export class AuthService {
 
         return {
             accessToken,
-            userId: user.id
+            userId: user.id,
+            role: user.role,
         };
     }
 
@@ -183,14 +185,19 @@ export class AuthService {
         const session = await this.prisma.session.findFirst({
             where: {
                 token
+            },
+            include: {
+                user: true
             }
         })
+
+
         this.logger.log(`session validated for userId: ${session.userId}, `);
 
-        if (!session || !session.token || session.expiresAt > new Date()) {
+        if (!session || !session.token || session.expiresAt > new Date() || session.user.role === 'Unknown') {
             return false; // Session is invalid or expired
         }
 
-        return true; // Session is valid
+        return true// Session is valid
     }
 }

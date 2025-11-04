@@ -27,4 +27,5 @@ export class RoomEntity implements Case {
     lastBotNodeId: string;
     meta: JsonValue;
     isNewCase: boolean;
+    lastMessageAt: Date
 }
