@@ -126,6 +126,8 @@ export class ChatGateway
   private sendFilteredCount(client: Socket, totalCount: number, unreadCount: number) {
     client.emit('filteredCount', { totalCount, unreadCount });
   }
+
+
   @SubscribeMessage('chatList')
   async handleChatList(
     client: Socket,
@@ -141,6 +143,7 @@ export class ChatGateway
     }
   ) {
     try {
+
       const page = payload?.page && payload.page > 0 ? payload.page : 1;
       const limit = payload?.limit ?? 50;
       const skip = (page - 1) * limit;
@@ -712,14 +715,14 @@ export class ChatGateway
     const updatedEvents = await this.prisma.statusEvent.findMany({
       where: { caseId },
       include: { user: true },
-      orderBy: { timestamp: 'asc' },
+      orderBy: { timestamp: 'desc' },
     });
     const updatedIssueEvents = await this.prisma.issueEvent.findMany({
       where: {
         caseId,
         status: 'CLOSED',
       },
-      orderBy: { closedAt: 'asc' }
+      orderBy: { closedAt: 'desc' }
     })
 
 
