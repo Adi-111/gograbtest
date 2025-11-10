@@ -3,10 +3,13 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthService } from '../auth.service';
+import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-    constructor(private authService: AuthService) {
+    constructor(private authService: AuthService,
+        private prisma: PrismaService
+    ) {
         super({
             jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
             ignoreExpiration: false,
@@ -14,16 +17,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         });
     }
 
-    async validate(payload: any) {
-        // Validate the session (optional)
-        const isValidSession = await this.authService.validateSession(
-            payload.sessionId,
-        );
+    /**
+  * Validate JWT payload
+  * @param payload - The decoded JWT payload ({ userId })
+  */
+    async validate(payload: { userId: number }) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: payload.userId },
+            select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                role: true,
+            },
+        });
 
-        if (!isValidSession) {
-            throw new UnauthorizedException('Invalid or expired session');
+        if (!user) {
+            throw new UnauthorizedException('Invalid token: user not found');
         }
 
-        return { userId: payload.sub, email: payload.email };
+        return user; // attaches to req.user
     }
 }

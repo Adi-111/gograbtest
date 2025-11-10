@@ -11,7 +11,6 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthEntity } from './entity/auth.entity';
 import { SignupDto } from './dto/sign-up.dto';
 import { LoginDto } from './dto/login.dto';
-import { User } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -59,7 +58,7 @@ export class AuthService {
             storedPassword: user.password
         });
 
-        const isPasswordValid = bcrypt.compare(String(password), user.password);
+        const isPasswordValid = await bcrypt.compare(String(password), user.password);
         if (!isPasswordValid) {
             throw new UnauthorizedException('Invalid credentials');
         }
@@ -130,6 +129,7 @@ export class AuthService {
      */
     async signIn(signInDto: LoginDto): Promise<AuthEntity> {
         const { email, password } = signInDto;
+        this.logger.log(`Sign-in attempt for email: ${email} ${JSON.stringify(password)}`);
 
         // Validate the user
         const user = await this.validateUser(email, password);
@@ -194,9 +194,10 @@ export class AuthService {
 
         this.logger.log(`session validated for userId: ${session.userId}, `);
 
-        if (!session || !session.token || session.expiresAt > new Date() || session.user.role === 'Unknown') {
-            return false; // Session is invalid or expired
+        if (!session || !session.token || session.expiresAt < new Date() || session.user.role === 'Unknown') {
+            return false;
         }
+
 
         return true// Session is valid
     }

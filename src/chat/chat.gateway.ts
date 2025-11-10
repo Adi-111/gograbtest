@@ -247,21 +247,6 @@ export class ChatGateway
           lastMessageAt: 'desc'
         }
       });
-      paginatedCases.sort((a, b) => {
-        // If both cases are solved, sort by closedAt descending
-        if (a.status === 'SOLVED' && b.status === 'SOLVED') {
-          const aClosed = a.issueEvents[0]?.closedAt ? new Date(a.issueEvents[0].closedAt).getTime() : 0;
-          const bClosed = b.issueEvents[0]?.closedAt ? new Date(b.issueEvents[0].closedAt).getTime() : 0;
-          return bClosed - aClosed;
-        }
-
-        // // If only one is solved, keep solved ones on top (optional)
-        // if (a.status === 'SOLVED' && b.status !== 'SOLVED') return -1;
-        // if (a.status !== 'SOLVED' && b.status === 'SOLVED') return 1;
-
-        // For all other cases, keep original order
-        return 0;
-      });
 
 
       // If status is EXPIRED, apply additional filtering for last message sender
@@ -387,7 +372,7 @@ export class ChatGateway
   ): Promise<void> {
     try {
       const { caseId, text, messageType, attachments } = payload;
-
+      this.logger.log(JSON.stringify(payload));
       // Validate required fields.
       if (!caseId || !payload.userId) {
         throw new Error('Missing required caseId or userId');

@@ -9,11 +9,12 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './guards/local-auth.guard';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
+
 import { SignupDto } from './dto/sign-up.dto';
 import { LoginDto } from './dto/login.dto';
 import { ApiTags, ApiOperation, ApiBody, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { Public } from './decorators/public.decorator';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -22,6 +23,8 @@ export class AuthController {
 
   constructor(private readonly authService: AuthService) { }
 
+
+  @Public()
   @Post('signup')
   @ApiOperation({ summary: 'Register a new user' })
   @ApiBody({ type: SignupDto })
@@ -31,6 +34,8 @@ export class AuthController {
     return this.authService.signUp(signUpDto);
   }
 
+
+  @Public()
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @ApiOperation({ summary: 'Log in a user' })
@@ -38,7 +43,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'User logged in successfully' })
   async login(@Request() req, @Body() loginDto: LoginDto) {
     this.logger.log(`User login attempt: ${loginDto.email}`);
-    return this.authService.signIn(req.user);
+    return await this.authService.signIn({ email: loginDto.email, password: loginDto.password });
   }
 
 

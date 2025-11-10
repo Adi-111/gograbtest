@@ -1,28 +1,34 @@
-import { Logger, Module } from '@nestjs/common';
+// src/auth/auth.module.ts
+import { Module } from '@nestjs/common';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthService } from './auth.service';
-import { AuthController } from './auth.controller';
-import { PrismaModule } from 'src/prisma/prisma.module';
-import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { APP_GUARD } from '@nestjs/core';
+import { AuthController } from './auth.controller';
+import { LocalStrategy } from './strategies/local.strategy';
 
 @Module({
   imports: [
-    PrismaModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
-      global: true,
       secret: process.env.JWT_SECRET,
-      signOptions: { expiresIn: '1h' },
+      signOptions: { expiresIn: '7d' },
     }),
   ],
   controllers: [AuthController],
   providers: [
+    PrismaService,
     AuthService,
-    Logger,
-    LocalStrategy,
     JwtStrategy,
+    LocalStrategy,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard, // makes all routes protected by default
+    },
   ],
+  exports: [AuthService],
 })
 export class AuthModule { }

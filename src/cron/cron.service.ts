@@ -20,11 +20,10 @@ export class CronService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly cusService: CustomerService,
-        private readonly chatService: ChatService
 
     ) { }
 
-    @Cron(CronExpression.EVERY_WEEK)
+    @Cron(CronExpression.EVERY_HOUR)
     async handleProductCron() {
         const products: ProductDto[] = await this.cusService.getProducts();
         await this.handleProductsUpdate(products);
@@ -40,7 +39,7 @@ export class CronService {
 
 
 
-    @Cron(CronExpression.EVERY_HOUR) // runs 4x/day; window logic decides which "business day" to summarize
+    @Cron(CronExpression.EVERY_30_MINUTES) // runs 4x/day; window logic decides which "business day" to summarize
     async handleDailyUserSummaries() {
 
         const { startUtc, endUtc, dateKeyUtc, startIST, endIST } = this.getIST4amWindow();
@@ -265,7 +264,7 @@ export class CronService {
             product_name: product.product_name,
             description: product.description,
             image: String(product.image),
-            category: product.category,
+            category: product.category || 'Uncategorized',
             product_price: Number(product.product_price),
             brand_name: product.brand_name,
             created_at: new Date(product.created_at),
