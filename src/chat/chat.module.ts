@@ -8,7 +8,7 @@ import { CloudModule } from 'src/cloud/cloud.module';
 
 
 @Module({
-  imports: [PrismaModule, CloudModule,
+  imports: [CloudModule,
     forwardRef(() => CustomerModule)],
   providers: [ChatService, ChatGateway, Logger],
   exports: [ChatService],

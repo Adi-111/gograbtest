@@ -5,7 +5,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 
 @Module({
   controllers: [MetricController],
-  providers: [MetricService, PrismaService, Logger],
+  providers: [MetricService, Logger],
 
 })
 export class MetricModule { }

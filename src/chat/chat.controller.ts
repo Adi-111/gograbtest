@@ -25,7 +25,7 @@ export class ChatController {
         @Query('byUserId') byUserId?: number,
         @Query('userId') userId?: number, // optional if you pass logged-in userId
     ) {
-        return this.chatService.getChatList({
+        return await this.chatService.getChatList({
             page,
             limit,
             search,

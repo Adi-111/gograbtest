@@ -7,6 +7,7 @@ import { CustomerService } from 'src/customer/customer.service';
 import { ChatService } from 'src/chat/chat.service';
 
 import { ProductDto } from 'src/customer/gg-backend/dto/products.dto';
+import { toYMD } from './utils';
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // +05:30
 
@@ -29,7 +30,7 @@ export class CronService {
         await this.handleProductsUpdate(products);
     }
 
-    @Cron(CronExpression.EVERY_6_HOURS)
+    @Cron(CronExpression.EVERY_2ND_HOUR)
     async handleMachineCron() {
         await this.cusService.syncMachine()
     }
@@ -39,7 +40,7 @@ export class CronService {
 
 
 
-    @Cron(CronExpression.EVERY_30_MINUTES) // runs 4x/day; window logic decides which "business day" to summarize
+    @Cron(CronExpression.EVERY_10_SECONDS)
     async handleDailyUserSummaries() {
 
         const { startUtc, endUtc, dateKeyUtc, startIST, endIST } = this.getIST4amWindow();
@@ -115,7 +116,11 @@ export class CronService {
 
 
     getIST4amWindow() {
-        const nowIST = toIST(new Date());
+
+
+        const nowIST = toIST(new Date(toYMD(new Date())));
+        // const nowIST = toIST(new Date('2025-11-24'));
+
 
 
 

@@ -1,7 +1,7 @@
 import { forwardRef, Logger, Module } from '@nestjs/common';
 
 // Modules
-import { PrismaModule } from 'src/prisma/prisma.module';
+
 import { CasesModule } from 'src/cases/cases.module';
 import { ChatModule } from 'src/chat/chat.module';
 
@@ -16,7 +16,6 @@ import { GGBackendModule } from './gg-backend/gg-backend.module';
 
 @Module({
   imports: [
-    PrismaModule,
     CloudModule,
     GGBackendModule,
     forwardRef(() => BotModule),

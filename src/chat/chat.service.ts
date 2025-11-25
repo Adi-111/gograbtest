@@ -46,7 +46,8 @@ export class ChatService {
             const limit = payload?.limit ?? 50;
             const skip = (page - 1) * limit;
 
-            this.logger.log(`Received chatList request: payload=${JSON.stringify(payload)}`);
+            this.logger.log(`Received chatList request: userId:${payload.userId}}`);
+
 
             // Build base filters
             const baseWhere: any = {};
@@ -54,7 +55,6 @@ export class ChatService {
 
 
 
-            // Search (customer name or phone)
             if (payload?.search) {
                 baseWhere.OR = [
                     { customer: { name: { contains: payload.search, mode: 'insensitive' } } },
@@ -122,11 +122,12 @@ export class ChatService {
                 }),
             ]);
 
+
             // Fetch paginated cases
             const paginatedCases = await this.prisma.case.findMany({
                 where: baseWhere,
                 skip,
-                take: Number(limit),
+                take: limit,
                 include: {
                     tags: true,
                     customer: true,
@@ -142,20 +143,9 @@ export class ChatService {
                     },
                 },
                 orderBy: {
-                    updatedAt: 'desc'
+                    lastMessageAt: 'desc'
                 }
             });
-            paginatedCases.sort((a, b) => {
-                // If both cases are solved, sort by closedAt descending
-                if (a.status === 'SOLVED' && b.status === 'SOLVED') {
-                    const aClosed = a.issueEvents[0]?.closedAt ? new Date(a.issueEvents[0].closedAt).getTime() : 0;
-                    const bClosed = b.issueEvents[0]?.closedAt ? new Date(b.issueEvents[0].closedAt).getTime() : 0;
-                    return bClosed - aClosed;
-                }
-                return 0;
-            });
-
-
             // If status is EXPIRED, apply additional filtering for last message sender
             let finalCases = paginatedCases;
             let adjustedFilteredCount = filteredCount;
@@ -196,7 +186,7 @@ export class ChatService {
                         },
 
                     },
-                    orderBy: { updatedAt: "desc" },
+                    orderBy: { lastMessageAt: "desc" },
                 });
 
                 adjustedFilteredCount = cases.length
@@ -208,8 +198,7 @@ export class ChatService {
                 currentPage: page,
                 totalPages: Math.ceil(adjustedFilteredCount / limit),
                 totalCount: adjustedFilteredCount,
-                unreadCaseCount,
-                unreadSum: unreadAgg._sum.unread ?? 0,
+                unreadCaseCount: unreadCaseCount,
                 cases: finalCases,
             };
         } catch (error) {

@@ -1,7 +1,6 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, Logger } from '@nestjs/common';
+import { Controller, Get, Query, Logger } from '@nestjs/common';
 import { MetricService } from './metric.service';
-import { CreateMetricDto } from './dto/create-metric.dto';
-import { UpdateMetricDto } from './dto/update-metric.dto';
+
 import { resolveRange } from './utils/date-range';
 
 @Controller('metric')
@@ -15,12 +14,11 @@ export class MetricController {
     @Query('preset') preset?: '1d' | '7d' | '30d',
     @Query('from') fromStr?: string,
     @Query('to') toStr?: string,
-    @Query('mode') mode?: 'issueOpened' | 'firstReply',
   ) {
 
-    const { from, to } = resolveRange(preset, fromStr, toStr);
-    const data = await this.metricService.agentsChatRefundsAndFRTInRange({ from, to, mode });
-    return { range: { from, to, preset: preset ?? null, mode: mode ?? 'issueOpened' }, data };
+    const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
+    const data = await this.metricService.CalculateUserWiseFRT(fromIST, toIST);
+    return data;
   }
 
   @Get("issue-per-machine")
@@ -28,15 +26,10 @@ export class MetricController {
     @Query("preset") preset?: "1d" | "7d" | "30d",
     @Query("from") fromStr?: string,
     @Query("to") toStr?: string,
-    @Query("mode") mode?: "opened" | "updated"
   ) {
-    const { from, to } = resolveRange(preset, fromStr, toStr);
-    const data = await this.metricService.issueTaggedPerMachineInRange({
-      from,
-      to,
-      mode: mode ?? "opened",
-    });
-    return { range: { from, to, preset: preset ?? "month", mode: mode ?? "opened" }, data };
+    const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
+    const data = await this.metricService.GetMachinePerIssues(fromIST, toIST);
+    return data;
   }
 
   @Get('msg-summary')
@@ -46,11 +39,11 @@ export class MetricController {
     @Query('to') toStr?: string,
     @Query('mode') mode?: 'opened' | 'updated',
   ) {
-    const { from, to } = resolveRange(preset, fromStr, toStr);
+    const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
 
     return await this.metricService.UserMessageSummary({
-      from,
-      to,
+      fromIST,
+      toIST,
       mode: mode || 'opened',
     });
 
@@ -63,10 +56,10 @@ export class MetricController {
     @Query('to') toStr?: string,
     @Query('mode') mode?: 'opened' | 'updated',
   ) {
-    const { from, to } = resolveRange(preset, fromStr, toStr);
+    const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
     return await this.metricService.agentIssueClosureAnalytics({
-      from,
-      to,
+      fromIST,
+      toIST,
       mode: mode || 'opened',
     });
   }
@@ -78,32 +71,14 @@ export class MetricController {
     @Query('to') toStr?: string,
     @Query('mode') mode?: 'opened' | 'updated',
   ) {
-    const { from, to } = resolveRange(preset, fromStr, toStr);
+    const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
     return await this.metricService.getManualRefundTrendPerAgent({
-      from,
-      to,
+      fromIST,
+      toIST,
       mode: mode || 'opened',
     });
   }
 
 
-  @Get('without-agent')
-  async withoutAgent(
-    @Query("preset") preset?: "1d" | "7d" | "30d",
-    @Query('from') fromStr?: string,
-    @Query('to') toStr?: string,
-    @Query('mode') mode?: 'opened' | 'updated',
-  ) {
-    // Default to last 30 days if not provided
-    const { from, to } = resolveRange(preset, fromStr, toStr);
 
-
-
-    return await this.metricService.percentResolvedWithoutAgent({
-      from,
-      to,
-      mode: mode || 'opened',
-    });
-
-  }
 }

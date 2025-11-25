@@ -8,7 +8,7 @@ export type AgentFRTSummary = {
 };
 
 export type AgentFRTQuery = {
-    from: Date;
-    to: Date;
+    fromIST: Date;
+    toIST: Date;
     mode?: 'issueOpened' | 'firstReply';
 };

@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AgentFRTQuery, AgentFRTSummary } from './types';
-import { IssueType } from '@prisma/client';
+import { IssueType, RefundMode, SenderType } from '@prisma/client';
 import { format } from 'date-fns/format';
+
 type IssueSummary = {
   machineName: string;
   total: number;
@@ -31,36 +32,231 @@ export class MetricService {
   ) { }
 
 
+  /**
+ * Shared function to fetch all issues in a given IST range.
+ * Keeps filters consistent for all metrics modules (FRT, closure, refunds, tagging).
+ */
+  async getIssuesInRange(
 
+    params: {
+      fromIST: Date;
+      toIST: Date;
+      mode?: 'opened' | 'updated';
+      includeClosedOnly?: boolean;
+    }
+  ) {
+    const { fromIST, toIST, mode = 'opened', includeClosedOnly = false } = params;
 
-  async agentIssueClosureAnalytics(params: {
-    from: Date;
-    to: Date;
-    mode?: "opened" | "updated";
-  }) {
-    const { from, to, mode = "opened" } = params;
-    this.logger.log(`Running agentIssueClosureAnalytics with`, params);
-
-    // 1️⃣ Time window filter (consistent with other metrics)
+    // Common time filter
     const timeFilter =
-      mode === "updated"
-        ? { updatedAt: { gte: from, lt: to } }
-        : { openedAt: { gte: from, lt: to } };
+      mode === 'updated'
+        ? { updatedAt: { gte: fromIST, lt: toIST } }
+        : { openedAt: { gte: fromIST, lt: toIST } };
 
-    // 2️⃣ Fetch all closed issues with userId
+    const where = {
+      ...(includeClosedOnly ? { closedAt: { not: null } } : {}),
+      ...timeFilter,
+      userId: { not: null }
+    };
     const issues = await this.prisma.issueEvent.findMany({
-      where: {
-        closedAt: { not: null },
-        ...timeFilter,
-      },
+      where,
+
       select: {
         id: true,
         userId: true,
-        openedAt: true,
-        closedAt: true,
         machineName: true,
         issueType: true,
+        refundMode: true,
+        refundAmountMinor: true,
+        openedAt: true,
+        updatedAt: true,
+        closedAt: true,
+        isActive: true,
+        agentCalledAt: true,
+        agentLinkedAt: true,
       },
+      orderBy: [{ updatedAt: 'desc' }],
+    });
+
+    // Centralized issue fields — avoids inconsistent select()s
+    return issues
+  }
+
+
+
+  async GetMachinePerIssues(from: Date, to: Date) {
+    // Step 1: Get all issues with machine info and refund mode
+    const issues = await this.prisma.issueEvent.findMany({
+      where: {
+        machine_id: { not: null },
+        created_at: {
+          gte: from,
+          lte: to,
+        },
+      },
+      select: {
+        machine_id: true,
+        machineName: true,
+        issueType: true,
+        refundMode: true,
+        refundAmountMinor: true,
+      },
+    });
+
+    const TotalIssues = issues.length - 1
+
+    // Step 2: Group issues by machine
+    const machineMap = new Map<string, {
+      machineName: string | null;
+      totalIssues: number;
+      autoRefunds: number;
+      manualRefunds: number;
+      manualRefundAmount: number;
+      issueTypeCounts: Record<string, number>;
+    }>();
+
+    for (const issue of issues) {
+      const key = issue.machine_id!;
+      const machine = machineMap.get(key) ?? {
+        machineName: issue.machineName || "Unknown",
+        totalIssues: 0,
+        autoRefunds: 0,
+        manualRefunds: 0,
+        manualRefundAmount: 0,
+        issueTypeCounts: {},
+      };
+
+      machine.totalIssues += 1;
+
+      const type = issue.issueType;
+      machine.issueTypeCounts[type] = (machine.issueTypeCounts[type] || 0) + 1;
+
+      if (type === IssueType.REFUND) {
+        if (issue.refundMode === RefundMode.MANUAL) {
+          machine.manualRefunds += 1;
+          machine.manualRefundAmount += issue.refundAmountMinor || 0;
+        } else if (issue.refundMode === RefundMode.AUTO) {
+          machine.autoRefunds += 1;
+        }
+      }
+
+      machineMap.set(key, machine);
+    }
+
+    // Step 3: Convert to array
+    const result = Array.from(machineMap.entries()).map(([machineId, data]) => ({
+      machineId,
+      machineName: data.machineName,
+      totalIssues: data.totalIssues,
+      autoRefunds: data.autoRefunds,
+      manualRefunds: data.manualRefunds,
+      manualRefundAmount: data.manualRefundAmount,
+      issueTypeCounts: data.issueTypeCounts,
+    }));
+
+    return { result, totalIssue: TotalIssues };
+  }
+
+  async CalculateUserWiseFRT(from: Date, to: Date) {
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: {
+          in: [3, 6, 8]
+        }
+      },
+      select: { id: true, firstName: true, lastName: true },
+    });
+
+    const result: any[] = [];
+
+    for (const user of users) {
+      // Step 1: Find all cases assigned to the user
+      const cases = await this.prisma.case.findMany({
+        where: { userId: user.id },
+        select: { id: true },
+      });
+
+      const caseIds = cases.map(c => c.id);
+      if (caseIds.length === 0) {
+        result.push({
+          userId: user.id,
+          userName: `${user.firstName} ${user.lastName}`,
+          avgFRTMinutes: null,
+          totalBotPrompts: 0,
+          totalReplies: 0,
+          frtList: [],
+        });
+        continue;
+      }
+
+      // Step 2: Fetch all messages in those cases
+      const messages = await this.prisma.message.findMany({
+        where: {
+          caseId: { in: caseIds },
+          timestamp: { gte: from, lte: to },
+        },
+        orderBy: { timestamp: "asc" },
+        select: {
+          id: true,
+          senderType: true,
+          timestamp: true,
+        },
+      });
+
+      let lastBotMsg: Date | null = null;
+      const frtList: number[] = [];
+
+      for (const msg of messages) {
+        if (msg.senderType === SenderType.BOT) {
+          lastBotMsg = msg.timestamp;
+        }
+
+        if (msg.senderType === SenderType.USER && lastBotMsg) {
+          const frtMs = msg.timestamp.getTime() - lastBotMsg.getTime();
+          const frtMinutes = frtMs / 1000 / 60;
+
+          frtList.push(frtMinutes);
+          lastBotMsg = null; // Reset
+        }
+      }
+
+      result.push({
+        userId: user.id,
+        userName: `${user.firstName} ${user.lastName}`,
+        avgFRTMinutes: frtList.length
+          ? Number((frtList.reduce((a, b) => a + b, 0) / frtList.length).toFixed(2))
+          : null,
+        totalBotPrompts: frtList.length,
+        totalReplies: frtList.length,
+        frtList,
+      });
+    }
+
+    return result;
+  }
+
+
+
+
+  async agentIssueClosureAnalytics(params: {
+    fromIST: Date;
+    toIST: Date;
+    mode?: "opened" | "updated";
+  }) {
+
+    const { fromIST, toIST, mode = "opened" } = params;
+
+    this.logger.log(`Running agentIssueClosureAnalytics with`, params);
+
+
+
+
+    // 2️⃣ Fetch all closed issues with userId
+    const issues = await this.getIssuesInRange({
+      fromIST,
+      toIST,
+      mode,
+      includeClosedOnly: true, // only closed issues
     });
 
     if (!issues.length) {
@@ -153,31 +349,33 @@ export class MetricService {
 
 
   async getManualRefundTrendPerAgent(params: {
-    from: Date;
-    to: Date;
+    fromIST: Date;
+    toIST: Date;
     mode?: 'opened' | 'updated';
   }) {
-    const { from, to, mode = 'opened' } = params;
+    const { fromIST, toIST, mode = 'opened' } = params;
 
     // 1️⃣ Time filter (like other metrics)
     const timeFilter =
       mode === 'updated'
-        ? { updatedAt: { gte: from, lt: to } }
-        : { openedAt: { gte: from, lt: to } };
+        ? { updatedAt: { gte: fromIST, lt: toIST } }
+        : { openedAt: { gte: fromIST, lt: toIST } };
 
     // 2️⃣ Fetch manual refund issues with relevant data
-    const issues = await this.prisma.issueEvent.findMany({
-      where: {
-        issueType: 'REFUND',
-        refundMode: 'MANUAL',
-        closedAt: { not: null },
-        userId: { not: null },
-        ...timeFilter,
-      },
-
-
-      orderBy: { closedAt: 'asc' },
+    const allIssues = await this.getIssuesInRange({
+      fromIST,
+      toIST,
+      mode,
+      includeClosedOnly: true,
     });
+
+    // 2️⃣ Filter manually refunded refund issues
+    const issues = allIssues.filter(
+      (i) =>
+        i.issueType === 'REFUND' &&
+        i.refundMode === 'MANUAL' &&
+        i.userId !== null
+    );
 
     // 3️⃣ Group by date + agent with aggregated info
     const grouped: Record<string, Record<number, { count: number; amount: number }>> = {};
@@ -211,7 +409,7 @@ export class MetricService {
             y: val ? val.count : 0,
             refundAmount: val ? val.amount : 0,
             tooltip: val
-              ? `Refunds: ${val.count} | Amount: ₹${(val.amount ).toFixed(2)}`
+              ? `Refunds: ${val.count} | Amount: ₹${(val.amount).toFixed(2)}`
               : 'No data',
           };
         }),
@@ -230,63 +428,20 @@ export class MetricService {
 
 
 
-  async percentResolvedWithoutAgent(params: {
-    from: Date;
-    to: Date;
-    mode?: "opened" | "updated";
-  }) {
-    const { from, to, mode = "opened" } = params;
 
-    // Filter dimension - same pattern as issueTaggedPerMachineInRange
-    const timeFilter =
-      mode === "updated"
-        ? { updatedAt: { gte: from, lt: to } }
-        : { openedAt: { gte: from, lt: to } };
-
-    // All solved issues within the time range
-    const issues = await this.prisma.issueEvent.findMany({
-      where: {
-        status: "CLOSED",
-        ...timeFilter,
-      },
-      select: {
-        userId: true,
-        agentCalledAt: true,
-        agentLinkedAt: true
-      }
-    });
-
-    // Aggregate in JS
-    const totalResolved = issues.length;
-    if (totalResolved === 0) {
-      return { totalResolved: 0, resolvedWithoutAgent: 0, percentage: 0 };
-    }
-
-    const resolvedWithoutAgent = issues.filter(
-      (i) => i.userId === null
-    ).length;
-
-    const percentage = (resolvedWithoutAgent / totalResolved) * 100;
-
-    return {
-      totalResolved,
-      resolvedWithoutAgent,
-      percentage: Math.round(percentage * 100) / 100, // 2 decimals
-    };
-  }
 
   async UserMessageSummary(params: {
-    from: Date;
-    to: Date;
+    fromIST: Date;
+    toIST: Date;
     mode?: "opened" | "updated"; // how to include issues in the window
   }) {
-    const { from, to } = params;
+    const { fromIST, toIST } = params;
 
     // Filter dimension
 
     const summaries = await this.prisma.dailyUserMessageSummary.findMany({
       where: {
-        date: { gte: from, lte: to },
+        date: { gte: fromIST, lte: toIST },
       },
       include: { user: true },
       orderBy: { date: 'desc' },
@@ -298,35 +453,26 @@ export class MetricService {
 
 
   async issueTaggedPerMachineInRange(params: {
-    from: Date;
-    to: Date;
+    fromIST: Date;
+    toIST: Date;
     mode?: "opened" | "updated"; // how to include issues in the window
   }): Promise<IssueSummary[]> {
-    const { from, to, mode } = params;
+    const { mode, fromIST, toIST } = params;
+
+    this.logger.log(fromIST, toIST);
+
 
     // Filter dimension
     const timeFilter =
       mode === "updated"
-        ? { updatedAt: { gte: from, lt: to } }
-        : { openedAt: { gte: from, lt: to } };
+        ? { updatedAt: { gte: fromIST, lt: toIST } }
+        : { openedAt: { gte: fromIST, lt: toIST } };
 
-    const issues = await this.prisma.issueEvent.findMany({
-      where: {
-        machineName: { not: null },
-        ...timeFilter,
-      },
-      select: {
-        id: true,
-        machineName: true,
-        issueType: true,
-        isActive: true,
-        openedAt: true,
-        updatedAt: true,
-        refundMode: true,
-        refundAmountMinor: true
-
-      },
-      orderBy: [{ machineName: "asc" }, { updatedAt: "desc" }],
+    const issues = await this.getIssuesInRange({
+      fromIST,
+      toIST,
+      mode,
+      includeClosedOnly: true, // includes open issues
     });
 
     const map = new Map<string, IssueSummary>();
@@ -380,110 +526,101 @@ export class MetricService {
     }
 
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
+
+
   }
   async agentsChatRefundsAndFRTInRange(query: AgentFRTQuery): Promise<AgentFRTSummary[]> {
-    const { from, to, mode = 'issueOpened' } = query;
+    const { fromIST, toIST, mode } = query;
 
-    // 1) Pull USER messages tied to an IssueEvent within the window you care about
-    //    We need ordering to detect "first agent per issue"
-    const rows = await this.prisma.message.findMany({
-      where: {
-        issueEventId: { not: null },
-        senderType: 'USER',
-        timestamp: { gte: new Date(0) }, // we filter via mode below to leverage composite conditions
-      },
-      select: {
-        id: true,
-        timestamp: true,
-        userId: true,
-        user: { select: { id: true, email: true } },
-        issueEventId: true,
-        issueEvent: {
-          select: {
-            id: true,
-            openedAt: true,
-            refundMode: true,
-          },
-        },
-      },
-      orderBy: [
-        { issueEventId: 'asc' },
-        { timestamp: 'asc' },
-        { id: 'asc' },
-      ],
+    this.logger.log(`Running FRT analytics (mode=${mode})`, { fromIST, toIST });
+
+    // ✅ 1️⃣ Fetch all issues in range using the shared utility
+    const issues = await this.getIssuesInRange({
+      fromIST,
+      toIST,
+      includeClosedOnly: true,
     });
 
-    // 2) First agent per IssueEvent
-    const firstAgentByIssue = new Map<number, {
-      agentId: number | null;
-      agentName: string;
-      firstAgentTime: Date;
-      openedAt: Date;
-      isManualRefund: boolean;
-    }>();
+    // ✅ 2️⃣ Filter only issues that have FRT-related fields
+    const validIssues = issues.filter(
+      (i: any) =>
+        i.agentLinkedAt &&
+        i.agentCalledAt &&
+        i.userId !== null // only issues handled by an agent
+    );
 
-    for (const r of rows) {
-      const issueId = r.issueEventId!;
-      if (!firstAgentByIssue.has(issueId)) {
-        firstAgentByIssue.set(issueId, {
-          agentId: r.userId ?? null,
-          agentName: r.user?.email ?? `Agent#${r.userId ?? 'unknown'}`,
-          firstAgentTime: r.timestamp,
-          openedAt: r.issueEvent!.openedAt,
-          isManualRefund: r.issueEvent!.refundMode === 'MANUAL',
-        });
-      }
+    if (!validIssues.length) {
+      this.logger.log('No FRT-eligible issues found in range');
+      return [];
     }
 
-    // 3) Filter by mode + aggregate
-    const agg = new Map<number, {
-      agentName: string;
-      totalChats: number;
-      manualRefunds: number;
-      frtSumMs: number;
-      frtCount: number;
-    }>();
+    // ✅ 3️⃣ Group by agent
+    const agg = new Map<
+      number,
+      {
+        agentName: string;
+        totalChats: number;
+        manualRefunds: number;
+        frtSumMs: number;
+        frtCount: number;
+      }
+    >();
 
-    for (const entry of firstAgentByIssue.values()) {
-      const inByOpened = entry.openedAt >= from && entry.openedAt < to;
-      const inByFirst = entry.firstAgentTime >= from && entry.firstAgentTime < to;
+    // Preload agent info
+    const uniqueAgentIds = Array.from(new Set(validIssues.map((i) => i.userId)));
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: uniqueAgentIds } },
+      select: { id: true, email: true, firstName: true, lastName: true },
+    });
+    const userMap = new Map(
+      users.map((u) => [
+        u.id,
+        `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email || `Agent#${u.id}`,
+      ])
+    );
 
-      const include =
-        (mode === 'issueOpened' && inByOpened) ||
-        (mode === 'firstReply' && inByFirst);
+    for (const issue of validIssues) {
+      const agentId = issue.userId!;
+      const agentName = userMap.get(agentId) || `Agent#${agentId}`;
+      const frtMs =
+        new Date(issue.agentLinkedAt).getTime() - new Date(issue.agentCalledAt).getTime();
 
-      if (!include || entry.agentId == null) continue;
+      if (frtMs < 0) continue; // skip negative durations (data anomaly)
 
-      const frtMs = entry.firstAgentTime.getTime() - entry.openedAt.getTime();
-
-      if (!agg.has(entry.agentId)) {
-        agg.set(entry.agentId, {
-          agentName: entry.agentName,
+      if (!agg.has(agentId)) {
+        agg.set(agentId, {
+          agentName,
           totalChats: 0,
           manualRefunds: 0,
           frtSumMs: 0,
           frtCount: 0,
         });
       }
-      const a = agg.get(entry.agentId)!;
+
+      const a = agg.get(agentId)!;
       a.totalChats += 1;
-      if (entry.isManualRefund) a.manualRefunds += 1;
-      if (frtMs >= 0) {
-        a.frtSumMs += frtMs;
-        a.frtCount += 1;
-      }
+      if (issue.refundMode === 'MANUAL') a.manualRefunds += 1;
+      a.frtSumMs += frtMs;
+      a.frtCount += 1;
     }
 
-    // 4) Format & sort
+    // ✅ 4️⃣ Compute averages and sort
     const result: AgentFRTSummary[] = Array.from(agg.entries()).map(([agentId, a]) => ({
       agentId,
       agentName: a.agentName,
       totalChats: a.totalChats,
       manualRefunds: a.manualRefunds,
-      avgFRTMinutes: a.frtCount ? Math.round(((a.frtSumMs / a.frtCount) / 60000) * 100) / 100 : 0,
+      avgFRTMinutes:
+        a.frtCount > 0 ? Math.round(((a.frtSumMs / a.frtCount) / 60000) * 100) / 100 : 0,
     }));
 
-    result.sort((x, y) => y.totalChats - x.totalChats);
+    result.sort((a, b) => b.totalChats - a.totalChats);
+
+    this.logger.log(
+      `✅ FRT analytics computed for ${result.length} agents using ${validIssues.length} issues`
+    );
+
     return result;
   }
 }
+

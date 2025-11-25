@@ -8,6 +8,7 @@ import { ChatEntity } from 'src/chat/entity/chat.entity';
 import { GGBackendService } from './gg-backend/gg-backend.service';
 import { error } from 'console';
 import { SendTemplateBody, WAComponent } from './dto/send-template.dto';
+import { Public } from 'src/auth/decorators/public.decorator';
 
 @Controller('read/webhook')
 @ApiTags('customer')
@@ -17,6 +18,7 @@ export class CustomerController {
 
   constructor(private readonly customerService: CustomerService, private readonly ggAppBackend: GGBackendService) { }
 
+  @Public()
   @Get() // Verifying webhook
   async verifyWebhook(
     @Query('hub.verify_token') token: string,
@@ -32,6 +34,7 @@ export class CustomerController {
     return res.sendStatus(403);
   }
 
+  @Public()
   @Post() // Handling messages from WhatsApp
   @ApiCreatedResponse({ type: ChatEntity })
   async handleIncomingMessage(@Body() body: any): Promise<any> {
@@ -39,16 +42,20 @@ export class CustomerController {
     return this.customerService.processIncomingMessage(body); // Process message with customer service
   }
 
+  @Public()
   @Get('approved-t')
   async getApprovedTemplates() {
     return await this.customerService.getApprovedTemplates();
   }
+
 
   @Post('test-msg')
   async testMsgProccessing(@Body() body: any) {
     await this.customerService.processIncomingMessage(body);
   }
 
+
+  @Public()
   @Post("send-t")
   async sendTemplateMessage(@Body() body: SendTemplateBody) {
     const { to } = body;
@@ -77,6 +84,8 @@ export class CustomerController {
   }
 
 
+
+  
   @Get('vend-info')
   async getVendInfo() {
     const order_id = "ORDER-GG1080-1748595367706";

@@ -565,23 +565,16 @@ export class CustomerService {
             let txnInfo: TransactionInfoDto;
 
             txnInfo = await this.gg_backend_service.bankTxn(utrId);
-            if (txnInfo.message === 'F404') {
+            if (txnInfo.message === 'F404' || txnInfo === null) {
                 await this.botService.botSendByNodeId('screenshot9', phoneNo, caseId);
                 return;
             }
-            if (txnInfo === null) {
-                await this.botService.botSendByNodeId('screenshot4', phoneNo, caseId);
-                return;
-            }
 
 
 
 
 
-            if (txnInfo === null) {
-                await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
-                return;
-            }
+
 
 
 
