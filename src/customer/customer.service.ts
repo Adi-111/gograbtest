@@ -361,7 +361,7 @@ export class CustomerService {
                         }
 
                     }
-                    // If it's text and there's a pending bot message (open-ended), use lastBotNodeId
+
 
 
 
@@ -396,6 +396,9 @@ export class CustomerService {
                         });
 
                         // 🔁 HARDCODED FLOW EXAMPLE
+
+
+
 
                         if (lastBotNodeId === 'main_question-FyKfq') {
                             await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.INITIATED, CaseHandler.USER);

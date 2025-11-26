@@ -295,7 +295,7 @@ export class ChatService {
                 };
                 let currIssueId = caseRecord.currentIssueId;
                 if (!caseRecord.currentIssueId) {
-                    const issueNew = await this.prisma.issueEvent.create({
+                    const issueNew = await tx.issueEvent.create({
                         data: {
                             caseId: caseRecord.id,
                             customerId: caseRecord.customerId
@@ -365,6 +365,9 @@ export class ChatService {
 
                 await this.notifyClients(message);
                 return message;
+            }, {
+                timeout: 60_000,        // 60 seconds
+                maxWait: 20_000         // 20 seconds for connection acquisition
             });
         } catch (error) {
             this.logger.error('Failed to create message', error.stack);
