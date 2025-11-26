@@ -642,6 +642,7 @@ export class ChatService {
                     await this.handleInteractiveButtons(caseRecord.customer.phoneNo, node, caseId, userId);
                     break;
                 case ReplyType.InteractiveList:
+                    await this.prisma.case.update({ where: { id: caseId }, data: { lastBotNodeId: 'agent-interactive' } })
                     await this.handleInteractiveList(caseRecord.customer.phoneNo, node, caseId, userId);
                     break;
                 default:

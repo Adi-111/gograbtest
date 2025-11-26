@@ -343,6 +343,31 @@ export class CustomerService {
                 && !caseRecord.isNewCase
             ) {
                 let botContent: string | undefined;
+                // ---------------------------------------------
+                // 🔵 RATING HANDLER (Agent Interactive List)
+                // ---------------------------------------------
+                if (
+                    message?.type === 'interactive' &&
+                    message?.interactive?.list_reply &&
+                    caseRecord.lastBotNodeId === 'agent-interactive'
+                ) {
+                    const replyId = message.interactive.list_reply.id;
+                    if (String(replyId).charAt(0) === 'u') {
+                        await this.handleAgentRating(replyId, caseRecord.id);
+                    }
+
+
+
+                    // Clear lastBotNodeId so bot does not get stuck
+                    await this.prisma.case.update({
+                        where: { id: caseRecord.id },
+                        data: { lastBotNodeId: null }
+                    });
+
+                    this.logger.log(`Agent Rating saved via ${replyId}`);
+                    return { customer, case: caseRecord };
+                }
+                // ---------------------------------------------
 
                 if (message.type === 'interactive') {
                     if (message.interactive?.button_reply) {
@@ -1061,6 +1086,43 @@ export class CustomerService {
             throw new Error('Failed to send document message');
         }
     }
+
+    async handleAgentRating(replyId: string, caseId: number) {
+        const ratingMap: Record<string, number> = {
+            ui1: 1,
+            ui2: 2,
+            ui3: 3,
+            ui4: 4,
+            ui5: 5,
+        };
+
+        const rating = ratingMap[replyId] ?? null;
+
+        if (!rating) {
+            this.logger.warn(`Invalid rating replyId received: ${replyId}`);
+            return;
+        }
+
+        // Find active issue
+        const caseRecord = await this.prisma.case.findUnique({
+            where: { id: caseId },
+            select: { currentIssueId: true }
+        });
+
+        if (!caseRecord?.currentIssueId) {
+            this.logger.error(`No active issue found for rating caseId ${caseId}`);
+            return;
+        }
+
+        // Save rating to issueEvent
+        await this.prisma.issueEvent.update({
+            where: { id: caseRecord.currentIssueId },
+            data: { agentRating: rating }
+        });
+
+        this.logger.log(`Saved agent rating: ${rating}`);
+    }
+
 
 
     async sendTextMessage(to: string, text: string) {
