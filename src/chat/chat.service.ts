@@ -273,107 +273,128 @@ export class ChatService {
     }
 
     // Updated createMessage method
-    async createMessage(createMessageDto: CreateMessageDto) {
+    async createMessage(dto: CreateMessageDto) {
         try {
-            return await this.prisma.$transaction(async (tx) => {
-                // Validate required fields
-                if (!createMessageDto.recipient) {
-                    throw new Error('Missing required message fields');
-                }
-                const caseRecord = await tx.case.findUnique({ where: { id: createMessageDto.caseId }, include: { customer: true } })
+            if (!dto.recipient) {
+                throw new Error("Missing recipient fields in meta message.");
+            }
 
-                // Create base message data without parentMessageId
-                const baseData = {
-                    type: createMessageDto.type,
-                    replyType: createMessageDto.replyType || null,
-                    senderType: createMessageDto.senderType,
-                    text: createMessageDto.text,
-                    recipient: createMessageDto.recipient,
-                    waMessageId: createMessageDto.waMessageId,
-                    systemStatus: createMessageDto.systemStatus || SystemMessageStatus.SENT,
-                    timestamp: new Date(),
-                };
-                let currIssueId = caseRecord.currentIssueId;
-                if (!caseRecord.currentIssueId) {
-                    const issueNew = await tx.issueEvent.create({
-                        data: {
-                            caseId: caseRecord.id,
-                            customerId: caseRecord.customerId
-                        }
-                    })
-                    await this.prisma.case.update({
-                        where: {
-                            id: caseRecord.id
-                        },
-                        data: {
-                            currentIssueId: issueNew.id
-                        }
-                    })
-                    currIssueId = issueNew.id
-                }
+            // ----------------------------
+            // STEP 1: Transaction (Fast, Atomic)
+            // ----------------------------
+            const { messageId, caseId } = await this.prisma.$transaction(async (tx) => {
 
-
-
-                // Create message with nested connections
-                const message: ChatEntity = await tx.message.create({
-                    data: {
-                        ...baseData,
-                        case: { connect: { id: createMessageDto.caseId } },
-                        issueEvent: { connect: { id: currIssueId } },
-                        ...(createMessageDto.userId && { user: { connect: { id: createMessageDto.userId } } }),
-                        ...(createMessageDto.botId && { bot: { connect: { id: createMessageDto.botId } } }),
-                        ...(createMessageDto.whatsAppCustomerId && {
-                            WhatsAppCustomer: { connect: { id: createMessageDto.whatsAppCustomerId } }
-                        }),
-                        ...(createMessageDto.mediaId && { media: { connect: { id: createMessageDto.mediaId } } }),
-
-                        // Connect the parent message if provided
-                        ...(createMessageDto.parentMessageId && {
-                            parentMessage: { connect: { id: createMessageDto.parentMessageId } }
-                        }),
-                        // Handle attachments without manually setting messageId
-
-                        ...(createMessageDto.location && {
-                            location: {
-                                create: {
-                                    ...createMessageDto.location
-                                }
-                            }
-                        }),
-                        ...(createMessageDto.interactive && {
-                            interactive: {
-                                create: {
-                                    ...createMessageDto.interactive
-                                }
-                            }
-                        }),
-
-                    },
-
-                    include: this.fullMessageIncludes()
+                // 1) Fetch case with minimal fields
+                const caseRec = await tx.case.findUnique({
+                    where: { id: dto.caseId },
+                    select: { id: true, customerId: true, currentIssueId: true },
                 });
 
-                // Handle contacts creation separately
-                if (createMessageDto.contacts?.length) {
+                if (!caseRec) throw new Error("Case not found");
+
+                let issueId = caseRec.currentIssueId;
+
+                // --- Create issueEvent if needed ---
+                if (!issueId) {
+                    const newIssue = await tx.issueEvent.create({
+                        data: {
+                            caseId: caseRec.id,
+                            customerId: caseRec.customerId,
+                        },
+                        select: { id: true }
+                    });
+
+                    issueId = newIssue.id;
+
+                    await tx.case.update({
+                        where: { id: caseRec.id },
+                        data: { currentIssueId: issueId }
+                    });
+                }
+
+                // --- Construct message payload ---
+                const createPayload: any = {
+                    type: dto.type,
+                    replyType: dto.replyType ?? null,
+                    senderType: dto.senderType,
+                    text: dto.text,
+                    recipient: dto.recipient,
+                    waMessageId: dto.waMessageId,
+                    systemStatus: dto.systemStatus || SystemMessageStatus.SENT,
+                    timestamp: new Date(),
+                    caseId: dto.caseId,
+                    issueEventId: issueId,
+                };
+
+                if (dto.userId) createPayload.userId = dto.userId;
+                if (dto.botId) createPayload.botId = dto.botId;
+                if (dto.whatsAppCustomerId) createPayload.whatsAppCustomerId = dto.whatsAppCustomerId;
+                if (dto.mediaId) createPayload.mediaId = dto.mediaId;
+                if (dto.parentMessageId) createPayload.parentMessageId = dto.parentMessageId;
+
+                if (dto.location) {
+                    createPayload.location = { create: { ...dto.location } };
+                }
+                if (dto.interactive) {
+                    createPayload.interactive = { create: { ...dto.interactive } };
+                }
+
+                // --- Create the message ---
+                const created = await tx.message.create({
+                    data: createPayload,
+                    select: { id: true, caseId: true },
+                });
+
+                // --- Contacts ---
+                if (dto.contacts?.length) {
                     await tx.contact.createMany({
-                        data: createMessageDto.contacts.map(contact => ({
-                            ...contact,
-                            messageId: message.id
+                        data: dto.contacts.map((c) => ({
+                            ...c,
+                            messageId: created.id,
                         }))
                     });
                 }
 
-                await this.notifyClients(message);
-                return message;
-            }, {
-                timeout: 60_000,        // 60 seconds
-                maxWait: 20_000         // 20 seconds for connection acquisition
+                return { messageId: created.id, caseId: created.caseId };
             });
+
+            // ----------------------------
+            // STEP 2: Fetch Full Message (Heavy Query)
+            // ----------------------------
+            const fullMessage = await this.prisma.message.findUnique({
+                where: { id: messageId },
+                include: this.fullMessageIncludes()
+            });
+
+            if (!fullMessage) {
+                throw new Error("Message fetch failed after transaction.");
+            }
+
+            // ----------------------------
+            // STEP 3: Update lastMessageAt (non-blocking)
+            // ----------------------------
+            this.prisma.case.update({
+                where: { id: caseId },
+                data: { lastMessageAt: new Date() }
+            }).catch(() => { });
+
+            // ----------------------------
+            // STEP 4: Notify WebSocket/WhatsApp async
+            // ----------------------------
+            setTimeout(() => {
+                this.notifyClients(fullMessage).catch(err => {
+                    this.logger.error("notifyClients error", err);
+                });
+            }, 0);
+
+            return fullMessage;
+
         } catch (error) {
-            this.logger.error('Failed to create message', error.stack);
+            this.logger.error("Failed to create message", error);
             throw error;
         }
     }
+
 
 
 
@@ -631,6 +652,7 @@ export class ChatService {
         }
     }
     async sendQuickMessage(quickMessageId: number, caseId: number, userId: number) {
+
         try {
             const caseRecord = await this.prisma.case.findUnique({ where: { id: caseId }, select: { customer: true } })
             const node = await this.prisma.quickReplies.findUnique({ where: { id: quickMessageId } })
