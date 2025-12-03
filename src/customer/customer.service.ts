@@ -241,7 +241,7 @@ export class CustomerService {
             const normalized = {
                 ...message,
                 type: 'text',
-                text: { body: emoji || '👍' }, // fallback if somehow empty
+                text: { body: emoji || '🫥' }, // fallback if somehow empty
             };
             // Replace reference for the remaining logic
             changes.value.messages[0] = normalized;
@@ -343,6 +343,7 @@ export class CustomerService {
                 && !caseRecord.isNewCase
             ) {
                 let botContent: string | undefined;
+
                 // ---------------------------------------------
                 // 🔵 RATING HANDLER (Agent Interactive List)
                 // ---------------------------------------------
@@ -386,7 +387,7 @@ export class CustomerService {
                         }
 
                     }
-
+                    // If it's text and there's a pending bot message (open-ended), use lastBotNodeId
 
 
 
@@ -421,9 +422,6 @@ export class CustomerService {
                         });
 
                         // 🔁 HARDCODED FLOW EXAMPLE
-
-
-
 
                         if (lastBotNodeId === 'main_question-FyKfq') {
                             await this.chatService.triggerStatusUpdateBot(caseRecord.id, Status.INITIATED, CaseHandler.USER);
@@ -1087,43 +1085,6 @@ export class CustomerService {
         }
     }
 
-    async handleAgentRating(replyId: string, caseId: number) {
-        const ratingMap: Record<string, number> = {
-            ui1: 1,
-            ui2: 2,
-            ui3: 3,
-            ui4: 4,
-            ui5: 5,
-        };
-
-        const rating = ratingMap[replyId] ?? null;
-
-        if (!rating) {
-            this.logger.warn(`Invalid rating replyId received: ${replyId}`);
-            return;
-        }
-
-        // Find active issue
-        const caseRecord = await this.prisma.case.findUnique({
-            where: { id: caseId },
-            select: { currentIssueId: true }
-        });
-
-        if (!caseRecord?.currentIssueId) {
-            this.logger.error(`No active issue found for rating caseId ${caseId}`);
-            return;
-        }
-
-        // Save rating to issueEvent
-        await this.prisma.issueEvent.update({
-            where: { id: caseRecord.currentIssueId },
-            data: { agentRating: rating }
-        });
-
-        this.logger.log(`Saved agent rating: ${rating}`);
-    }
-
-
 
     async sendTextMessage(to: string, text: string) {
         return this.sendWhatsAppRequest({
@@ -1291,6 +1252,42 @@ export class CustomerService {
     }
     async syncMachine() {
         await this.gg_backend_service.getAllMachinesFromGG();
+    }
+
+    async handleAgentRating(replyId: string, caseId: number) {
+        const ratingMap: Record<string, number> = {
+            ui1: 1,
+            ui2: 2,
+            ui3: 3,
+            ui4: 4,
+            ui5: 5,
+        };
+
+        const rating = ratingMap[replyId] ?? null;
+
+        if (!rating) {
+            this.logger.warn(`Invalid rating replyId received: ${replyId}`);
+            return;
+        }
+
+        // Find active issue
+        const caseRecord = await this.prisma.case.findUnique({
+            where: { id: caseId },
+            select: { currentIssueId: true }
+        });
+
+        if (!caseRecord?.currentIssueId) {
+            this.logger.error(`No active issue found for rating caseId ${caseId}`);
+            return;
+        }
+
+        // Save rating to issueEvent
+        await this.prisma.issueEvent.update({
+            where: { id: caseRecord.currentIssueId },
+            data: { agentRating: rating }
+        });
+
+        this.logger.log(`Saved agent rating: ${rating}`);
     }
 
 

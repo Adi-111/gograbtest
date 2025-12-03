@@ -32,6 +32,18 @@ export class MetricController {
     return data;
   }
 
+  @Get("get-agentRating")
+  async getAgentRating(
+    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query("from") fromStr?: string,
+    @Query("to") toStr?: string,
+  ) {
+    const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
+    const data = await this.metricService.GetAgentRating(fromIST, toIST);
+    return data;
+
+  }
+
   @Get('msg-summary')
   async msgSummary(
     @Query("preset") preset?: "1d" | "7d" | "30d",
@@ -78,6 +90,34 @@ export class MetricController {
       mode: mode || 'opened',
     });
   }
+
+  @Get("comparison")
+  async comparisonMetrics(
+    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    const { fromIST, toIST } = resolveRange(preset, from, to);
+    const currentTo = new Date(toIST);
+    const currentFrom = new Date(fromIST);
+
+    // You already compute your comparison windows
+    const windowDays = (currentTo.getTime() - currentFrom.getTime()) / (1000 * 3600 * 24);
+
+    const previousTo = new Date(currentFrom);
+    previousTo.setDate(previousTo.getDate() - 1);
+
+    const previousFrom = new Date(previousTo);
+    previousFrom.setDate(previousFrom.getDate() - windowDays);
+
+    return this.metricService.getComparisonMetrics({
+      currentFrom,
+      currentTo,
+      previousFrom,
+      previousTo
+    });
+  }
+
 
 
 

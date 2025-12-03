@@ -540,7 +540,11 @@ export class ChatGateway
       const { caseId } = payload;
       const contacts = await this.prisma.case.findUnique({
         where: { id: caseId },
-        select: { tags: true, customer: true, user: true, status: true, assignedTo: true, notes: true },
+        select: {
+          tags: true, customer: true, user: true, status: true, assignedTo: true, notes: {
+            include: { user: true }
+          }
+        },
       });
       client.emit('contacts-list', contacts);
     } catch (error) {

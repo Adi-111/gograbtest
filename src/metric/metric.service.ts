@@ -32,6 +32,14 @@ export class MetricService {
   ) { }
 
 
+
+
+  private safePct(current: number, previous: number): number {
+    if (!previous || previous === 0) return 0;
+    return ((current - previous) / previous) * 100;
+  }
+
+
   /**
  * Shared function to fetch all issues in a given IST range.
  * Keeps filters consistent for all metrics modules (FRT, closure, refunds, tagging).
@@ -82,6 +90,35 @@ export class MetricService {
     return issues
   }
 
+
+  async GetAgentRating(from: Date, to: Date) {
+    const issues = await this.prisma.issueEvent.findMany({
+      where: {
+        agentRating: {
+          not: null
+        },
+        created_at: {
+          gte: from,
+          lte: to,
+        }
+      },
+      select: {
+        agentRating: true
+      }
+    });
+    const numberOfRatings = issues.length;
+    const ratingSum = issues.reduce((sum, r) => sum + (r.agentRating ?? 0), 0);
+    const maxRating = numberOfRatings * 5;
+    const agentRatingPercentage = numberOfRatings > 0
+      ? (ratingSum / maxRating) * 100
+      : 0;
+
+    return {
+      ratings: issues,
+      totalIssue: numberOfRatings,
+      percentage: agentRatingPercentage
+    }
+  }
 
 
   async GetMachinePerIssues(from: Date, to: Date) {
@@ -622,5 +659,90 @@ export class MetricService {
 
     return result;
   }
+
+
+  async getComparisonMetrics(params: {
+    currentFrom: Date;
+    currentTo: Date;
+    previousFrom: Date;
+    previousTo: Date;
+  }) {
+    const { currentFrom, currentTo, previousFrom, previousTo } = params;
+
+    // ---- Fetch metrics for current window ----
+    const currentFRT = await this.CalculateUserWiseFRT(currentFrom, currentTo);
+    const currentMachine = await this.GetMachinePerIssues(currentFrom, currentTo);
+    const currentRating = await this.GetAgentRating(currentFrom, currentTo);
+
+    // ---- Fetch metrics for previous window ----
+    const previousFRT = await this.CalculateUserWiseFRT(previousFrom, previousTo);
+    const previousMachine = await this.GetMachinePerIssues(previousFrom, previousTo);
+    const previousRating = await this.GetAgentRating(previousFrom, previousTo);
+
+
+    // ---- Metric Computations ----
+
+    // Total chats
+    const totalChatsCurrent = currentFRT.reduce((s, a) => s + (a.totalBotPrompts || 0), 0);
+    const totalChatsPrevious = previousFRT.reduce((s, a) => s + (a.totalBotPrompts || 0), 0);
+
+    const chatsChange = this.safePct(totalChatsCurrent, totalChatsPrevious);
+
+    // Avg FRT
+    const avgFRTCurrent = currentFRT.length
+      ? currentFRT.reduce((s, a) => s + a.avgFRTMinutes, 0) / currentFRT.length
+      : 0;
+
+    const avgFRTPrevious = previousFRT.length
+      ? previousFRT.reduce((s, a) => s + a.avgFRTMinutes, 0) / previousFRT.length
+      : 0;
+
+    const frtChange = this.safePct(avgFRTCurrent, avgFRTPrevious);
+
+    // Refund rate
+    const getRefundRate = (data) => {
+      if (!data.totalIssue) return 0;
+      const manualRefunds = data.result.reduce((s, r) => s + r.manualRefunds, 0)
+      return (manualRefunds / data.totalIssue) * 100
+    }
+
+    const refundCurrent = getRefundRate(currentMachine);
+    const refundPrevious = getRefundRate(previousMachine);
+    const refundChange = this.safePct(refundCurrent, refundPrevious);
+
+    // Satisfaction
+    const satCurrent = currentRating.percentage || 0;
+    const satPrevious = previousRating.percentage || 0;
+    const satChange = this.safePct(satCurrent, satPrevious);
+
+
+    return {
+      chats: {
+        current: totalChatsCurrent,
+        previous: totalChatsPrevious,
+        changeValue: chatsChange,
+        isPositive: chatsChange >= 0,
+      },
+      avgFRT: {
+        current: avgFRTCurrent,
+        previous: avgFRTPrevious,
+        changeValue: frtChange,
+        isPositive: frtChange < 0, // lower is better
+      },
+      refundRate: {
+        current: refundCurrent,
+        previous: refundPrevious,
+        changeValue: refundChange,
+        isPositive: refundChange < 0,
+      },
+      customerSatisfaction: {
+        current: satCurrent,
+        previous: satPrevious,
+        changeValue: satChange,
+        isPositive: satChange >= 0,
+      },
+    };
+  }
+
 }
 
