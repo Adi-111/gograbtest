@@ -316,6 +316,13 @@ export class CustomerService {
             this.logger.log("onButtons", onButtons);
             this.logger.log("lastBotNodeId", lastBotNodeId);
 
+
+            if (storedMessage.media.url) {
+                await this.getUtrIdFromImg(storedMessage.media.url, caseRecord.id)
+            }
+
+
+
             if (lastBotNodeId === 'stop') {
                 this.logger.warn(`Bot is stopped for case ${caseRecord.id}, ignoring message.`);
                 const updatedCase = await this.prisma.case.update({
@@ -546,6 +553,36 @@ export class CustomerService {
         } catch (error) {
             this.logger.error('Message processing failed', error.stack);
             throw error;
+        }
+    }
+
+    async getUtrIdFromImg(url: string, caseId: number) {
+        try {
+            const utrID = await this.cloudService.refundStatus(url);
+            if (!utrID) {
+                this.logger.warn('No UTR ID extracted from screenshot. Retrying refund screenshot...');
+                return;
+            }
+            if (utrID) {
+                const issueId = (await this.prisma.case.findUnique({
+                    where: {
+                        id: caseId
+                    },
+                    select: {
+                        currentIssueId: true
+                    }
+                })).currentIssueId
+                await this.prisma.issueEvent.update({
+                    where: { id: issueId },
+                    data: {
+                        utr: utrID
+                    }
+                })
+            }
+            this.logger.warn(`utrId is ${utrID}`)
+
+        } catch (error) {
+            this.logger.error(`Error in handleRefundScreenshot: ${error}`);
         }
     }
 
@@ -919,6 +956,7 @@ export class CustomerService {
                 }
                 else {
                     media = await this.handleMediaMessage(message);
+
                 }
             }
         }
