@@ -11,7 +11,7 @@ export class MetricController {
 
   @Get('agents-frt')
   async getAgentsFRT(
-    @Query('preset') preset?: '1d' | '7d' | '30d',
+    @Query('preset') preset?: 'today' | '1d' | '7d' | '30d',
     @Query('from') fromStr?: string,
     @Query('to') toStr?: string,
   ) {
@@ -23,7 +23,7 @@ export class MetricController {
 
   @Get("issue-per-machine")
   async getIssuePerMachine(
-    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query("preset") preset?: "today" | "1d" | "7d" | "30d",
     @Query("from") fromStr?: string,
     @Query("to") toStr?: string,
   ) {
@@ -34,19 +34,19 @@ export class MetricController {
 
   @Get("get-agentRating")
   async getAgentRating(
-    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query("preset") preset?: "today" | "1d" | "7d" | "30d",
     @Query("from") fromStr?: string,
     @Query("to") toStr?: string,
   ) {
     const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
-    const data = await this.metricService.GetAgentRating(fromIST, toIST);
+    const data = await this.metricService.GetAgentRatings(fromIST, toIST);
     return data;
 
   }
 
   @Get('msg-summary')
   async msgSummary(
-    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query("preset") preset?: "today" | "1d" | "7d" | "30d",
     @Query('from') fromStr?: string,
     @Query('to') toStr?: string,
     @Query('mode') mode?: 'opened' | 'updated',
@@ -63,7 +63,7 @@ export class MetricController {
 
   @Get('slow-issues')
   async SlowIssues(
-    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query("preset") preset?: "today" | "1d" | "7d" | "30d",
     @Query('from') fromStr?: string,
     @Query('to') toStr?: string,
     @Query('mode') mode?: 'opened' | 'updated',
@@ -78,7 +78,7 @@ export class MetricController {
 
   @Get('agent-trend')
   async agentTrendline(
-    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query("preset") preset?: "today" | "1d" | "7d" | "30d",
     @Query('from') fromStr?: string,
     @Query('to') toStr?: string,
     @Query('mode') mode?: 'opened' | 'updated',
@@ -93,7 +93,7 @@ export class MetricController {
 
   @Get("comparison")
   async comparisonMetrics(
-    @Query("preset") preset?: "1d" | "7d" | "30d",
+    @Query("preset") preset?: "today" | "1d" | "7d" | "30d",
     @Query("from") from?: string,
     @Query("to") to?: string,
   ) {

@@ -42,12 +42,11 @@ export class ChatService {
         }
     ) {
         try {
-            const page = payload?.page && payload.page > 0 ? payload.page : 1;
-            const limit = payload?.limit ?? 50;
+            const page = payload?.page && Number(payload.page) > 0 ? Number(payload.page) : 1;
+            const limit = payload?.limit ? Number(payload.limit) : 50;
             const skip = (page - 1) * limit;
 
-            this.logger.log(`Received chatList request: userId:${payload.userId}}`);
-
+            this.logger.log(`Received chatList request: payload=${JSON.stringify(payload)}`);
 
             // Build base filters
             const baseWhere: any = {};
@@ -55,6 +54,7 @@ export class ChatService {
 
 
 
+            // Search (customer name or phone)
             if (payload?.search) {
                 baseWhere.OR = [
                     { customer: { name: { contains: payload.search, mode: 'insensitive' } } },
@@ -91,7 +91,7 @@ export class ChatService {
                 baseWhere.AND = baseWhere.AND || [];
                 baseWhere.AND.push({
                     assignedTo: 'USER',
-                    userId: payload.userId,
+                    userId: Number(payload.userId),
                 });
             } else if (payload?.handler && payload.handler !== 'MY_CHATS') {
                 baseWhere.assignedTo = payload.handler;
@@ -99,7 +99,7 @@ export class ChatService {
 
             if (payload?.byUserId) {
                 baseWhere.AND = baseWhere.AND || [];
-                baseWhere.AND.push({ userId: payload.byUserId });
+                baseWhere.AND.push({ userId: Number(payload.byUserId) });
             }
 
             // Tags
@@ -121,7 +121,6 @@ export class ChatService {
                     _sum: { unread: true },
                 }),
             ]);
-
 
             // Fetch paginated cases
             const paginatedCases = await this.prisma.case.findMany({
@@ -146,6 +145,8 @@ export class ChatService {
                     lastMessageAt: 'desc'
                 }
             });
+
+
             // If status is EXPIRED, apply additional filtering for last message sender
             let finalCases = paginatedCases;
             let adjustedFilteredCount = filteredCount;
@@ -191,18 +192,15 @@ export class ChatService {
 
                 adjustedFilteredCount = cases.length
             }
-
-
-
             return {
+                cases: finalCases,
                 currentPage: page,
                 totalPages: Math.ceil(adjustedFilteredCount / limit),
                 totalCount: adjustedFilteredCount,
                 unreadCaseCount: unreadCaseCount,
-                cases: finalCases,
             };
         } catch (error) {
-            this.logger.error('Error fetching chat list', error);
+            this.logger.error('chatList error:', error);
             throw error;
         }
     }
@@ -358,24 +356,21 @@ export class ChatService {
                 return { messageId: message.id, caseId: message.caseId };
             })
             // ----------------------------
-            // STEP 2: Fetch Full Message (Heavy Query)
+            // STEP 2: Fetch Message with Required Fields Only
             // ----------------------------
             const fullMessage: ChatEntity = await this.prisma.message.findUnique({
                 where: { id: messageId },
-                include: this.fullMessageIncludes()
+                include: this.requiredMessageIncludes()
             });
             if (!fullMessage) {
                 throw new Error("Message fetch failed after transaction.");
             }
-            setTimeout(() => {
-                this.notifyClients(fullMessage).catch(err => {
-                    this.logger.error("notifyClients error", err);
-                });
-            }, 0);
+            await this.notifyClients(fullMessage);
             return fullMessage;
 
+
         } catch (error) {
-            const err = error as any;
+            const err = error as AxiosError<any>;
 
             const meta = {
                 caseId: createMessageDto.caseId,
@@ -502,6 +497,29 @@ export class ChatService {
             replies: true,
 
             case: true,
+        };
+    }
+
+    /**
+     * Optimized includes for createMessage - only fetches fields required by:
+     * - notifyClients() for WebSocket emission
+     * - formatPreview() / getSenderInfo() for chat list updates
+     * - Callers that need message.id for status updates
+     * 
+     * Removed (not used in notifyClients or by callers):
+     * - bot: only botId needed, not full bot details
+     * - location: not used in notifyClients
+     * - contacts: not used in notifyClients
+     * - parentMessage: not used in notifyClients
+     * - replies: not used and always empty for newly created messages
+     * - case: fetched separately in notifyClients
+     */
+    private requiredMessageIncludes() {
+        return {
+            user: true,             // Needed for getSenderInfo (id, firstName, lastName)
+            WhatsAppCustomer: true, // Needed for getSenderInfo (id, name, phoneNo)
+            media: true,            // Needed for IMAGE/DOCUMENT message handling
+            interactive: true,      // Needed for INTERACTIVE message handling
         };
     }
 

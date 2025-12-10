@@ -4,16 +4,11 @@ import * as os from 'os';
 import * as newrelic from 'newrelic';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CustomerService } from 'src/customer/customer.service';
-import { ChatService } from 'src/chat/chat.service';
 
 import { ProductDto } from 'src/customer/gg-backend/dto/products.dto';
-import { toYMD } from './utils';
 
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // +05:30
-
-// Convert between UTC <-> IST using fixed offset (IST has no DST)
-const toIST = (d: Date) => new Date(d.getTime() + IST_OFFSET_MS);
-const fromIST = (d: Date) => new Date(d.getTime() - IST_OFFSET_MS);
+// IST = UTC + 5:30 (no DST)
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 @Injectable()
 export class CronService {
@@ -40,7 +35,7 @@ export class CronService {
 
 
 
-    @Cron(CronExpression.EVERY_10_SECONDS)
+    @Cron(CronExpression.EVERY_HOUR)
     async handleDailyUserSummaries() {
 
         const { startUtc, endUtc, dateKeyUtc, startIST, endIST } = this.getIST4amWindow();
@@ -115,38 +110,61 @@ export class CronService {
 
 
 
+    /**
+     * Returns the 4AM IST → 4AM IST (next day) business day window.
+     * Uses UTC methods throughout to work consistently on ANY server timezone.
+     * 
+     * Business day: 4:00 AM IST → 3:59:59.999 AM IST (next day)
+     * Since IST = UTC + 5:30:
+     *   - 4:00 AM IST = 22:30 UTC (previous calendar day)
+     *   - 3:59:59.999 AM IST = 22:29:59.999 UTC
+     */
     getIST4amWindow() {
+        // Get current UTC time (works identically on any server)
+        const nowUtc = new Date();
+        // For testing: 
+        // const nowUtc = new Date('2025-12-09');
 
+        // Convert UTC to IST by adding offset
+        // We use UTC methods to read these values, treating the result as "IST representation"
+        const nowIst = new Date(nowUtc.getTime() + IST_OFFSET_MS);
 
-        const nowIST = toIST(new Date(toYMD(new Date())));
-        // const nowIST = toIST(new Date('2025-11-24'));
+        // Determine business day date in IST (midnight IST)
+        const businessDayIst = new Date(Date.UTC(
+            nowIst.getUTCFullYear(),
+            nowIst.getUTCMonth(),
+            nowIst.getUTCDate(),
+            0, 0, 0, 0
+        ));
 
+        // If before 4AM IST, we're still in previous day's business day
+        if (nowIst.getUTCHours() < 4) {
+            businessDayIst.setUTCDate(businessDayIst.getUTCDate() - 1);
+        }
 
+        this.logger.log(`Business day (IST): ${businessDayIst.toISOString().split('T')[0]}`);
 
+        // Start: 4:00 AM IST on business day (stored as UTC-shifted representation)
+        const startIST = new Date(businessDayIst);
+        startIST.setUTCHours(4, 0, 0, 0);
 
-        this.logger.log(`checking for date : ${nowIST.getDate()}`);
-
-        // Start at 04:00 IST
-        const startIST = new Date(nowIST.setHours(0));
-        startIST.setHours(4, 0, 0, 0);
-
-        // End = next day 03:59:59.999 IST
+        // End: 3:59:59.999 AM IST next day
         const endIST = new Date(startIST);
-        endIST.setDate(endIST.getDate() + 1);
-        endIST.setMilliseconds(endIST.getMilliseconds() - 1);
+        endIST.setUTCDate(endIST.getUTCDate() + 1);
+        endIST.setUTCMilliseconds(endIST.getUTCMilliseconds() - 1);
 
-        // Convert to UTC but shift ahead by +9h 30m
-        const offsetMs = 9.5 * 60 * 60 * 1000; // +9 hours 30 minutes
-        const startUtc = new Date(fromIST(startIST).getTime() + offsetMs);
-        const endUtc = new Date(fromIST(endIST).getTime() + offsetMs);
+        // Convert IST representation back to actual UTC for database queries
+        const startUtc = new Date(startIST.getTime() - IST_OFFSET_MS);
+        const endUtc = new Date(endIST.getTime() - IST_OFFSET_MS);
 
+        // Title date (next calendar day in IST)
         const titleDateIST = new Date(startIST);
-        titleDateIST.setDate(titleDateIST.getDate() + 1);
+        titleDateIST.setUTCDate(titleDateIST.getUTCDate() + 1);
 
         return {
             startUtc,
             endUtc,
-            dateKeyUtc: startUtc,
+            dateKeyUtc: startIST,
             startIST,
             endIST,
             titleDateIST

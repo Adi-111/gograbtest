@@ -91,34 +91,86 @@ export class MetricService {
   }
 
 
-  async GetAgentRating(from: Date, to: Date) {
-    const issues = await this.prisma.issueEvent.findMany({
+  async GetAgentRatings(from: Date, to: Date) {
+    // Step 1: Fetch rating rows
+    const rows = await this.prisma.issueEvent.findMany({
       where: {
-        agentRating: {
-          not: null
-        },
-        created_at: {
-          gte: from,
-          lte: to,
-        }
+        agentRating: { not: null },
+        created_at: { gte: from, lte: to },
+        userId: { not: null }
       },
       select: {
+        userId: true,
         agentRating: true
       }
     });
-    const numberOfRatings = issues.length;
-    const ratingSum = issues.reduce((sum, r) => sum + (r.agentRating ?? 0), 0);
-    const maxRating = numberOfRatings * 5;
-    const agentRatingPercentage = numberOfRatings > 0
-      ? (ratingSum / maxRating) * 100
-      : 0;
+
+    if (rows.length === 0) {
+      return {
+        agents: [],
+        overallAvg: 0,
+        overallPercentage: 0
+      };
+    }
+
+    // Step 2: Agent-wise aggregation + global aggregation
+    const map = new Map<number, { ratingSum: number; total: number }>();
+
+    let globalSum = 0;
+    let globalCount = 0;
+
+    for (const r of rows) {
+      const uid = r.userId!;
+      globalSum += r.agentRating ?? 0;
+      globalCount += 1;
+
+      if (!map.has(uid)) {
+        map.set(uid, { ratingSum: 0, total: 0 });
+      }
+
+      const agg = map.get(uid)!;
+      agg.ratingSum += r.agentRating ?? 0;
+      agg.total += 1;
+    }
+
+    // Step 3: Bulk fetch users
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: Array.from(map.keys()) } },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true
+      }
+    });
+
+    const userLookup = new Map(users.map(u => [u.id, u]));
+
+    // Step 4: Build agent-wise result
+    const agents = Array.from(map.entries()).map(([uid, stats]) => {
+      const user = userLookup.get(uid);
+      const maxRating = stats.total * 5;
+
+      return {
+        user,
+        totalRatings: stats.total,
+        avgRating: stats.ratingSum / stats.total,
+        percentage: maxRating ? (stats.ratingSum / maxRating) * 100 : 0
+      };
+    });
+
+    // Step 5: Compute overall
+    const overallAvg = globalSum / globalCount;            // e.g., 4.2 out of 5
+    const overallPercentage = (overallAvg / 5) * 100;      // convert to %
 
     return {
-      ratings: issues,
-      totalIssue: numberOfRatings,
-      percentage: agentRatingPercentage
-    }
+      agents,
+      overallAvg,
+      overallPercentage
+    };
   }
+
+
 
 
   async GetMachinePerIssues(from: Date, to: Date) {
@@ -207,24 +259,17 @@ export class MetricService {
     const result: any[] = [];
 
     for (const user of users) {
-      // Step 1: Find all cases assigned to the user
+      // Step 1: Find all cases assigned to the user within the date range
       const cases = await this.prisma.case.findMany({
-        where: { userId: user.id },
+        where: {
+          userId: user.id,
+          createdAt: { gte: from, lte: to },
+        },
         select: { id: true },
       });
 
       const caseIds = cases.map(c => c.id);
-      if (caseIds.length === 0) {
-        result.push({
-          userId: user.id,
-          userName: `${user.firstName} ${user.lastName}`,
-          avgFRTMinutes: null,
-          totalBotPrompts: 0,
-          totalReplies: 0,
-          frtList: [],
-        });
-        continue;
-      }
+      const totalChats = cases.length;
 
       // Step 2: Fetch all messages in those cases
       const messages = await this.prisma.message.findMany({
@@ -240,6 +285,44 @@ export class MetricService {
         },
       });
 
+      // Count messages sent by the agent (USER type)
+      const totalMessages = messages.filter(m => m.senderType === SenderType.USER).length;
+
+      // Step 3: Fetch refund data from IssueEvent
+      const issueEvents = await this.prisma.issueEvent.findMany({
+        where: {
+          userId: user.id,
+          issueType: 'REFUND',
+          openedAt: { gte: from, lte: to },
+        },
+        select: {
+          refundMode: true,
+          refundAmountMinor: true,
+        },
+      });
+
+      const manualRefunds = issueEvents.filter(e => e.refundMode === 'MANUAL').length;
+      const autoRefunds = issueEvents.filter(e => e.refundMode === 'AUTO').length;
+      const manualRefundAmount = issueEvents
+        .filter(e => e.refundMode === 'MANUAL')
+        .reduce((sum, e) => sum + (e.refundAmountMinor || 0), 0);
+
+      if (caseIds.length === 0) {
+        result.push({
+          userId: user.id,
+          userName: `${user.firstName} ${user.lastName}`,
+          totalChats: 0,
+          totalMessages: 0,
+          manualRefunds,
+          manualRefundAmount,
+          autoRefunds,
+          avgFRTMinutes: null,
+          frtList: [],
+        });
+        continue;
+      }
+
+      // Step 4: Calculate FRT
       let lastBotMsg: Date | null = null;
       const frtList: number[] = [];
 
@@ -260,11 +343,14 @@ export class MetricService {
       result.push({
         userId: user.id,
         userName: `${user.firstName} ${user.lastName}`,
+        totalChats,
+        totalMessages,
+        manualRefunds,
+        manualRefundAmount,
+        autoRefunds,
         avgFRTMinutes: frtList.length
           ? Number((frtList.reduce((a, b) => a + b, 0) / frtList.length).toFixed(2))
           : null,
-        totalBotPrompts: frtList.length,
-        totalReplies: frtList.length,
         frtList,
       });
     }
@@ -672,29 +758,29 @@ export class MetricService {
     // ---- Fetch metrics for current window ----
     const currentFRT = await this.CalculateUserWiseFRT(currentFrom, currentTo);
     const currentMachine = await this.GetMachinePerIssues(currentFrom, currentTo);
-    const currentRating = await this.GetAgentRating(currentFrom, currentTo);
+    const currentRating = await this.GetAgentRatings(currentFrom, currentTo);
 
     // ---- Fetch metrics for previous window ----
     const previousFRT = await this.CalculateUserWiseFRT(previousFrom, previousTo);
     const previousMachine = await this.GetMachinePerIssues(previousFrom, previousTo);
-    const previousRating = await this.GetAgentRating(previousFrom, previousTo);
+    const previousRating = await this.GetAgentRatings(previousFrom, previousTo);
 
 
     // ---- Metric Computations ----
 
     // Total chats
-    const totalChatsCurrent = currentFRT.reduce((s, a) => s + (a.totalBotPrompts || 0), 0);
-    const totalChatsPrevious = previousFRT.reduce((s, a) => s + (a.totalBotPrompts || 0), 0);
+    const totalChatsCurrent = currentFRT.reduce((s, a) => s + (a.totalChats || 0), 0);
+    const totalChatsPrevious = previousFRT.reduce((s, a) => s + (a.totalChats || 0), 0);
 
     const chatsChange = this.safePct(totalChatsCurrent, totalChatsPrevious);
 
     // Avg FRT
     const avgFRTCurrent = currentFRT.length
-      ? currentFRT.reduce((s, a) => s + a.avgFRTMinutes, 0) / currentFRT.length
+      ? currentFRT.reduce((s, a) => s + (a.avgFRTMinutes || 0), 0) / currentFRT.length
       : 0;
 
     const avgFRTPrevious = previousFRT.length
-      ? previousFRT.reduce((s, a) => s + a.avgFRTMinutes, 0) / previousFRT.length
+      ? previousFRT.reduce((s, a) => s + (a.avgFRTMinutes || 0), 0) / previousFRT.length
       : 0;
 
     const frtChange = this.safePct(avgFRTCurrent, avgFRTPrevious);
@@ -711,8 +797,8 @@ export class MetricService {
     const refundChange = this.safePct(refundCurrent, refundPrevious);
 
     // Satisfaction
-    const satCurrent = currentRating.percentage || 0;
-    const satPrevious = previousRating.percentage || 0;
+    const satCurrent = currentRating.overallPercentage || 0;
+    const satPrevious = previousRating.overallPercentage || 0;
     const satChange = this.safePct(satCurrent, satPrevious);
 
 

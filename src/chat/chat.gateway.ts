@@ -541,7 +541,7 @@ export class ChatGateway
       const contacts = await this.prisma.case.findUnique({
         where: { id: caseId },
         select: {
-          tags: true, customer: true, user: true, status: true, assignedTo: true, notes: {
+          tags: { include: { user: true } }, customer: true, user: true, status: true, assignedTo: true, notes: {
             include: { user: true }
           }
         },
@@ -573,7 +573,7 @@ export class ChatGateway
         where: { id: caseId },
         select: {
           id: true,
-          tags: true,
+          tags: { include: { user: true } },
           customer: true,
           user: true,
           status: true,
@@ -1319,12 +1319,12 @@ export class ChatGateway
         },
         select: {
           id: true,
-          tags: true,
           assignedTo: true,
           customer: true,
           user: true,
           status: true,
-          notes: true,
+          notes: { include: { user: true } },
+          tags: { include: { user: true } },
         },
       });
 
@@ -1346,23 +1346,19 @@ export class ChatGateway
         data: { assignedTo },
         select: {
           id: true,
-          tags: true,
+
           customer: true,
           user: true,
           status: true,
           assignedTo: true,
           notes: {
             include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  email: true
-                }
-              },
+              user: true,
               case: true
             }
           },
+
+          tags: { include: { user: true } },
         },
       });
 
@@ -1391,7 +1387,7 @@ export class ChatGateway
         where: { id: caseId },
         select: {
           id: true,
-          tags: true,
+          tags: { include: { user: true } },
           customer: true,
           user: true,
           status: true,
@@ -1430,7 +1426,7 @@ export class ChatGateway
         where: { id: caseId },
         select: {
           id: true,
-          tags: true,
+          tags: { include: { user: true } },
           customer: true,
           user: true,
           status: true,

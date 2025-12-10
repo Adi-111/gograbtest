@@ -1,59 +1,74 @@
 // utils/date-range.ts
-import { startOfDay, startOfMonth, addMinutes, subDays } from "date-fns";
+import { startOfDay, startOfMonth, subDays } from "date-fns";
+
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // 5h 30m in milliseconds
+
+/**
+ * Convert a UTC Date to IST-equivalent Date object.
+ * Use this when you need to compute IST day/month boundaries.
+ */
+function toIST(date: Date): Date {
+    return new Date(date.getTime() + IST_OFFSET_MS);
+}
+
+/**
+ * Convert an IST-based Date back to UTC for DB queries.
+ * Database stores timestamps in UTC.
+ */
+function istToUTC(istDate: Date): Date {
+    return new Date(istDate.getTime() - IST_OFFSET_MS);
+}
 
 /**
  * Utility to resolve a date range either from a preset or from explicit params.
- * All returned Date objects are IST-corrected (shifted from UTC).
+ * Returns UTC Date objects for database queries, but respects IST day/month boundaries.
+ * 
+ * Example: At 12:05 AM IST on Dec 7:
+ * - "today" preset → Dec 7 00:00 IST to now = Dec 6 18:30 UTC to Dec 6 18:35 UTC
+ * - "1d" preset → rolling 24 hours back
  */
 export function resolveRange(
-    preset?: "1d" | "7d" | "30d",
+    preset?: "today" | "1d" | "7d" | "30d",
     from?: string,
     to?: string
 ) {
     const nowUTC = new Date();
+    const nowInIST = toIST(nowUTC);
 
-    // Convert "now" to IST reference
-    const IST_OFFSET_MINUTES = 5 * 60 + 30;
-    const nowIST = addMinutes(nowUTC, IST_OFFSET_MINUTES);
-
-    let fromIST: Date;
-    let toIST = nowIST;
+    let rangeFromIST: Date;
+    let rangeToIST: Date = nowInIST;
 
     switch (preset) {
+        case "today":
+            // Start of today in IST (midnight IST)
+            rangeFromIST = startOfDay(nowInIST);
+            break;
         case "1d":
-            fromIST = subDays(nowIST, 1);
+            // Rolling 24 hours (but from IST day start for consistency)
+            rangeFromIST = startOfDay(subDays(nowInIST, 1));
             break;
         case "7d":
-            fromIST = subDays(nowIST, 7);
+            rangeFromIST = startOfDay(subDays(nowInIST, 7));
             break;
         case "30d":
-            fromIST = subDays(nowIST, 30);
+            rangeFromIST = startOfDay(subDays(nowInIST, 30));
             break;
         default:
-            // ✅ Default = start of current month (in IST)
-            fromIST = startOfMonth(startOfDay(nowIST));
+            // Default = start of current month in IST
+            rangeFromIST = startOfMonth(nowInIST);
             break;
     }
 
     // Custom range overrides presets if provided
+    // Assume user passes IST-intended date strings (e.g., "2024-12-01")
     if (from && to) {
-        fromIST = addMinutes(new Date(from), IST_OFFSET_MINUTES);
-        toIST = addMinutes(new Date(to), IST_OFFSET_MINUTES);
+        rangeFromIST = new Date(from);
+        rangeToIST = new Date(to);
     }
 
-    // Shift back to UTC for DB queries (we store UTC)
-    return toISTRange(fromIST, toIST,);
-}
-
-/**
- * Converts a Date (assumed UTC or IST) to IST window bounds.
- * Shifts the Date by +5h30m to align with Indian Standard Time,
- * returning both shifted values.
- */
-export function toISTRange(from: Date, to: Date) {
-    const IST_OFFSET_MINUTES = 5 * 60 + 30;
+    // Convert IST boundaries back to UTC for database queries
     return {
-        fromIST: addMinutes(from, -IST_OFFSET_MINUTES),
-        toIST: addMinutes(to, -IST_OFFSET_MINUTES),
+        fromIST: istToUTC(rangeFromIST),
+        toIST: istToUTC(rangeToIST),
     };
 }
