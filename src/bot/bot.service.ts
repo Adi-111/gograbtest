@@ -5,18 +5,22 @@ import { BotReplies, CaseHandler, MessageType, ReplyType, SenderType, Status, Sy
 import { ChatService } from 'src/chat/chat.service';
 import { RefundDetailDto } from 'src/customer/dto/refund-details.dto';
 import { MergedProductDetail } from 'src/customer/types';
-//main_message-ILtoz
+import { QueueService } from 'src/queue';
 
 @Injectable()
 export class BotService {
     private readonly logger = new Logger(BotService.name);
+
+    // Set to true to queue messages, false to send directly (useful for debugging)
+    private readonly useQueue = true;
 
     constructor(
         @Inject(forwardRef(() => ChatService))
         private readonly chatService: ChatService,
         @Inject(forwardRef(() => CustomerService))
         private readonly customerService: CustomerService,
-        private readonly prisma: PrismaService
+        private readonly prisma: PrismaService,
+        private readonly queueService: QueueService,
     ) { }
 
 
@@ -155,8 +159,20 @@ export class BotService {
             timestamp: new Date(),
             recipient: phoneNumber
         }
-        await this.chatService.createMessage(message);
-        await this.customerService.sendTextMessage(phoneNumber, framedMsg);
+        const savedMessage = await this.chatService.createMessage(message);
+
+        if (this.useQueue) {
+            // Queue the refund confirmation message (high priority)
+            await this.queueService.queueWhatsAppText({
+                phoneNo: phoneNumber,
+                text: framedMsg,
+                caseId,
+                messageId: savedMessage.id,
+            }, { priority: 10 }); // High priority for refund messages
+        } else {
+            await this.customerService.sendTextMessage(phoneNumber, framedMsg);
+        }
+
         await this.botSendByNodeId('las', phoneNumber, caseId);
     }
 
@@ -177,11 +193,23 @@ export class BotService {
         };
 
         const savedMessage = await this.chatService.createMessage(message);
-        await this.customerService.sendTextMessage(phoneNumber, body.text);
-        await this.prisma.message.update({
-            where: { id: savedMessage.id },
-            data: { systemStatus: SystemMessageStatus.DELIVERED },
-        });
+
+        if (this.useQueue) {
+            // Queue the WhatsApp message for async delivery
+            await this.queueService.queueWhatsAppText({
+                phoneNo: phoneNumber,
+                text: body.text,
+                caseId,
+                messageId: savedMessage.id,
+            });
+        } else {
+            // Direct send (legacy)
+            await this.customerService.sendTextMessage(phoneNumber, body.text);
+            await this.prisma.message.update({
+                where: { id: savedMessage.id },
+                data: { systemStatus: SystemMessageStatus.DELIVERED },
+            });
+        }
     }
 
     private async handleInteractiveButtons(phoneNumber: string, node: BotReplies, caseId: number): Promise<void> {
@@ -209,16 +237,31 @@ export class BotService {
         };
 
         const savedMessage = await this.chatService.createMessage(message);
-        await this.customerService.sendButtons(phoneNumber, {
-            header: (node.header as any)?.text,
-            footer: (node.footer as any)?.text,
-            body: (node.body as any)?.text || 'Please choose an option:',
-            buttons: action.buttons,
-        });
-        await this.prisma.message.update({
-            where: { id: savedMessage.id },
-            data: { systemStatus: SystemMessageStatus.DELIVERED },
-        });
+
+        if (this.useQueue) {
+            // Queue the WhatsApp buttons message
+            await this.queueService.queueWhatsAppButtons({
+                phoneNo: phoneNumber,
+                header: (node.header as any)?.text,
+                body: (node.body as any)?.text || 'Please choose an option:',
+                footer: (node.footer as any)?.text,
+                buttons: action.buttons,
+                caseId,
+                messageId: savedMessage.id,
+            });
+        } else {
+            // Direct send (legacy)
+            await this.customerService.sendButtons(phoneNumber, {
+                header: (node.header as any)?.text,
+                footer: (node.footer as any)?.text,
+                body: (node.body as any)?.text || 'Please choose an option:',
+                buttons: action.buttons,
+            });
+            await this.prisma.message.update({
+                where: { id: savedMessage.id },
+                data: { systemStatus: SystemMessageStatus.DELIVERED },
+            });
+        }
     }
 
     private async handleInteractiveList(phoneNumber: string, node: BotReplies, caseId: number): Promise<void> {
@@ -245,16 +288,31 @@ export class BotService {
         };
 
         const savedMessage = await this.chatService.createMessage(message);
-        await this.customerService.sendInteractiveList(phoneNumber, {
-            body: (node.body as any)?.text || 'Please select from the list:',
-            buttonText: action.button || 'Options',
-            footer: (node.footer as any)?.text,
-            sections: action.sections,
-        });
-        await this.prisma.message.update({
-            where: { id: savedMessage.id },
-            data: { systemStatus: SystemMessageStatus.DELIVERED },
-        });
+
+        if (this.useQueue) {
+            // Queue the WhatsApp list message
+            await this.queueService.queueWhatsAppList({
+                phoneNo: phoneNumber,
+                body: (node.body as any)?.text || 'Please select from the list:',
+                buttonText: action.button || 'Options',
+                footer: (node.footer as any)?.text,
+                sections: action.sections,
+                caseId,
+                messageId: savedMessage.id,
+            });
+        } else {
+            // Direct send (legacy)
+            await this.customerService.sendInteractiveList(phoneNumber, {
+                body: (node.body as any)?.text || 'Please select from the list:',
+                buttonText: action.button || 'Options',
+                footer: (node.footer as any)?.text,
+                sections: action.sections,
+            });
+            await this.prisma.message.update({
+                where: { id: savedMessage.id },
+                data: { systemStatus: SystemMessageStatus.DELIVERED },
+            });
+        }
     }
 
     public async sendFallbackMessage(phoneNumber: string, caseId: number): Promise<void> {
@@ -265,8 +323,9 @@ export class BotService {
                 }
             });
 
+            const messageText = (botReply?.body as any)?.text || 'Oops! Something went wrong.';
             const message = {
-                text: (botReply?.body as any)?.text || 'Oops! Something went wrong.',
+                text: messageText,
                 type: MessageType.TEXT,
                 senderType: SenderType.BOT,
                 caseId,
@@ -276,11 +335,21 @@ export class BotService {
             };
 
             const savedMessage = await this.chatService.createMessage(message);
-            await this.customerService.sendTextMessage(phoneNumber, message.text);
-            await this.prisma.message.update({
-                where: { id: savedMessage.id },
-                data: { systemStatus: SystemMessageStatus.DELIVERED },
-            });
+
+            if (this.useQueue) {
+                await this.queueService.queueWhatsAppText({
+                    phoneNo: phoneNumber,
+                    text: messageText,
+                    caseId,
+                    messageId: savedMessage.id,
+                });
+            } else {
+                await this.customerService.sendTextMessage(phoneNumber, messageText);
+                await this.prisma.message.update({
+                    where: { id: savedMessage.id },
+                    data: { systemStatus: SystemMessageStatus.DELIVERED },
+                });
+            }
 
             // Optional: restart from default node
             botReply = await this.prisma.botReplies.findUnique({ where: { nodeId: 'hi' } });
@@ -401,7 +470,7 @@ export class BotService {
                 `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n`;
         } else {
             // This handles cases where there's at least one failed dispense, or a mix.
-            msg += `\nRefund hasn’t been processed yet for this one. Please wait a bit—our team will check and get back to you shortly.\n\n`;  // Added a "Thank you!" for consistency, feel free to adjust.
+            msg += `\nRefund hasn't been processed yet for this one. Please wait a bit—our team will check and get back to you shortly.\n\n`;  // Added a "Thank you!" for consistency, feel free to adjust.
         }
         const message = {
             text: msg,
@@ -412,8 +481,18 @@ export class BotService {
             timestamp: new Date(),
             recipient: phoneNumber
         }
-        await this.chatService.createMessage(message);
-        await this.customerService.sendTextMessage(phoneNumber, msg);
+        const savedMessage = await this.chatService.createMessage(message);
+
+        if (this.useQueue) {
+            await this.queueService.queueWhatsAppText({
+                phoneNo: phoneNumber,
+                text: msg,
+                caseId,
+                messageId: savedMessage.id,
+            });
+        } else {
+            await this.customerService.sendTextMessage(phoneNumber, msg);
+        }
     }
 
     async sendWelcomeMsg(phoneNo: string, caseId: number) {
@@ -422,7 +501,7 @@ export class BotService {
                 phoneNo
             }
         })
-        const framedMsg = `Hi, ${cus.name} 😊\nWelcome to Go-Grab Support!\nWe’re here to help and make sure you’re always snack-happy 🍿\nPlease choose an option from the menu below 👇`;
+        const framedMsg = `Hi, ${cus.name} 😊\nWelcome to Go-Grab Support!\nWe're here to help and make sure you're always snack-happy 🍿\nPlease choose an option from the menu below 👇`;
         const framedBody = {
             "sections": [{ "rows": [{ "id": "main_buttons-bCVmo", "title": "Order Fail/Refund Issues", "description": "" }, { "id": "main_buttons-hSJwk", "title": "Machine Issues", "description": "" }, { "id": "main_question-sZPbm", "title": "Product Quality Issues", "description": "" }, { "id": "main_message-DqzXV", "title": "RFID Card Recharge", "description": "" }, { "id": "main_question-nyJZr", "title": "Suggestions or Feedback", "description": "" }, { "id": "main_buttons-ELECtro", "title": "Electronic Products", "description": "" }, { "id": "main_question-FyKfq", "title": "Others", "description": "" }], "title": "Please select" }]
         }
@@ -441,19 +520,34 @@ export class BotService {
         };
 
         const savedMessage = await this.chatService.createMessage(message);
-        await this.customerService.sendInteractiveList(phoneNo, {
-            body: framedMsg,
-            buttonText: 'Options',
-            footer: '',
-            sections: framedBody.sections,
-        });
+
+        if (this.useQueue) {
+            // Queue the welcome message
+            await this.queueService.queueWhatsAppList({
+                phoneNo,
+                body: framedMsg,
+                buttonText: 'Options',
+                footer: '',
+                sections: framedBody.sections,
+                caseId,
+                messageId: savedMessage.id,
+            });
+        } else {
+            await this.customerService.sendInteractiveList(phoneNo, {
+                body: framedMsg,
+                buttonText: 'Options',
+                footer: '',
+                sections: framedBody.sections,
+            });
+            await this.prisma.message.update({
+                where: { id: savedMessage.id },
+                data: { systemStatus: SystemMessageStatus.DELIVERED },
+            });
+        }
+
         await this.prisma.case.update({
             where: { id: caseId },
             data: { lastBotNodeId: 'hi' },
-        });
-        await this.prisma.message.update({
-            where: { id: savedMessage.id },
-            data: { systemStatus: SystemMessageStatus.DELIVERED },
         });
     }
 }
