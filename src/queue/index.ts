@@ -1,5 +1,6 @@
 export * from './queue.module';
 export * from './queue.service';
 export * from './queue.types';
-export { PG_BOSS } from './pg-boss.provider';
+export * from './queue.controller';
+export { PG_BOSS, DEAD_LETTER_QUEUE } from './pg-boss.provider';
 

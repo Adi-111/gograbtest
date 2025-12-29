@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import * as os from 'os';
 import * as newrelic from 'newrelic';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CustomerService } from 'src/customer/customer.service';
+import { ChatService } from 'src/chat/chat.service';
 
 import { ProductDto } from 'src/customer/gg-backend/dto/products.dto';
 
@@ -16,7 +17,8 @@ export class CronService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly cusService: CustomerService,
-
+        @Inject(forwardRef(() => ChatService))
+        private readonly chatService: ChatService,
     ) { }
 
     @Cron(CronExpression.EVERY_HOUR)
@@ -28,6 +30,45 @@ export class CronService {
     @Cron(CronExpression.EVERY_2ND_HOUR)
     async handleMachineCron() {
         await this.cusService.syncMachine()
+    }
+
+    // @Cron(CronExpression.EVERY_10_SECONDS)
+    @Cron(CronExpression.EVERY_5_MINUTES)
+    async traceUnreadCases() {
+        try {
+            this.logger.log('🔍 Starting scheduled unread cases tracing...');
+
+            // Call getChatList with UNREAD filter
+            // The traceUnreadCases method inside getChatList will automatically send data to New Relic
+            const result = await this.chatService.getChatList({
+                status: 'UNREAD',
+                page: 1,
+                limit: 1, // We only need the count, not the actual cases
+                userId: 0, // System cron job
+            });
+
+            this.logger.log(
+                `✅ Unread cases traced: ${result.unreadCaseCount} cases with ${result.totalCount} total unread messages`
+            );
+
+            // Additional metric for cron job execution tracking
+            newrelic.recordCustomEvent('UnreadCasesCronExecution', {
+                unreadCaseCount: result.unreadCaseCount,
+                totalCount: result.totalCount,
+                executionTime: new Date().toISOString(),
+                status: 'success',
+            });
+
+        } catch (error) {
+            this.logger.error('❌ Failed to trace unread cases in cron job', error);
+
+            // Record failure in New Relic
+            newrelic.recordCustomEvent('UnreadCasesCronExecution', {
+                executionTime: new Date().toISOString(),
+                status: 'failed',
+                error: error.message,
+            });
+        }
     }
 
 
@@ -96,6 +137,149 @@ export class CronService {
         }
 
         this.logger.log(`✅ DailyUserMessageSummary complete for business day starting (IST) ${startIST.toDateString()}`);
+    }
+
+
+    /**
+     * Daily cron job to track "Oops! Something went wrong." error messages
+     * Sends both current day and historical data to New Relic
+     * Runs every hour and reports on the current business day (4AM IST → 4AM IST)
+     */
+    @Cron(CronExpression.EVERY_HOUR)
+    async trackErrorMessages() {
+        try {
+            this.logger.log('🔍 Starting error message tracking (Oops! Something went wrong.)...');
+
+            const { startUtc, endUtc, startIST, endIST } = this.getIST4amWindow();
+
+            this.logger.log(
+                `⏳ Error tracking window IST: ${startIST.toISOString()} → ${endIST.toISOString()}`
+            );
+
+            // Get error messages for current business day
+            const currentDayErrors = await this.prisma.message.findMany({
+                where: {
+                    text: { contains: 'Oops! Something went wrong.', mode: 'insensitive' },
+                    timestamp: { gte: startUtc, lte: endUtc },
+                },
+                select: {
+                    id: true,
+                    timestamp: true,
+                    caseId: true,
+                    recipient: true,
+                    senderType: true,
+                },
+                orderBy: { timestamp: 'asc' },
+            });
+
+            // Get total historical count (all time before current business day)
+            const historicalErrorCount = await this.prisma.message.count({
+                where: {
+                    text: { contains: 'Oops! Something went wrong.', mode: 'insensitive' },
+                    timestamp: { lt: startUtc },
+                },
+            });
+
+            // Get total count including current day
+            const totalErrorCount = await this.prisma.message.count({
+                where: {
+                    text: { contains: 'Oops! Something went wrong.', mode: 'insensitive' },
+                },
+            });
+
+            // Group current day errors by hour for better insights
+            const errorsByHour: Record<number, number> = {};
+            currentDayErrors.forEach((msg) => {
+                const istTime = new Date(msg.timestamp.getTime() + IST_OFFSET_MS);
+                const hour = istTime.getUTCHours();
+                errorsByHour[hour] = (errorsByHour[hour] || 0) + 1;
+            });
+
+            // Get unique cases affected today
+            const uniqueCasesAffected = new Set(
+                currentDayErrors.map((msg) => msg.caseId).filter((id) => id !== null)
+            ).size;
+
+            // Get unique customers affected today
+            const uniqueCustomersAffected = new Set(
+                currentDayErrors.map((msg) => msg.recipient).filter((r) => r !== null)
+            ).size;
+
+            // Send comprehensive data to New Relic
+            newrelic.recordCustomEvent('DailyErrorMessageTracking', {
+                // Current business day metrics
+                currentDayErrorCount: currentDayErrors.length,
+                currentDayDate: startIST.toISOString().split('T')[0],
+
+                // Historical metrics
+                historicalErrorCount,
+                totalErrorCount,
+
+                // Impact metrics
+                uniqueCasesAffectedToday: uniqueCasesAffected,
+                uniqueCustomersAffectedToday: uniqueCustomersAffected,
+
+                // Time window
+                windowStartIST: startIST.toISOString(),
+                windowEndIST: endIST.toISOString(),
+
+                // Execution metadata
+                executionTime: new Date().toISOString(),
+                status: 'success',
+            });
+
+            // Send hourly distribution as separate events for better analysis
+            if (currentDayErrors.length > 0) {
+                Object.entries(errorsByHour).forEach(([hour, count]) => {
+                    newrelic.recordCustomEvent('ErrorMessageHourlyDistribution', {
+                        date: startIST.toISOString().split('T')[0],
+                        hourIST: parseInt(hour),
+                        errorCount: count,
+                        timestamp: new Date().toISOString(),
+                    });
+                });
+            }
+
+            // Record metrics for dashboard
+            newrelic.recordMetric('Custom/ErrorMessages/CurrentDay', currentDayErrors.length);
+            newrelic.recordMetric('Custom/ErrorMessages/Historical', historicalErrorCount);
+            newrelic.recordMetric('Custom/ErrorMessages/Total', totalErrorCount);
+            newrelic.recordMetric('Custom/ErrorMessages/CasesAffectedToday', uniqueCasesAffected);
+            newrelic.recordMetric('Custom/ErrorMessages/CustomersAffectedToday', uniqueCustomersAffected);
+
+            this.logger.log(
+                `✅ Error message tracking complete:
+                - Current day: ${currentDayErrors.length} errors
+                - Historical: ${historicalErrorCount} errors
+                - Total: ${totalErrorCount} errors
+                - Cases affected today: ${uniqueCasesAffected}
+                - Customers affected today: ${uniqueCustomersAffected}`
+            );
+
+            // Log warning if error count is unusually high
+            if (currentDayErrors.length > 50) {
+                this.logger.warn(
+                    `⚠️ High error message count detected today: ${currentDayErrors.length} errors`
+                );
+
+                newrelic.recordCustomEvent('HighErrorMessageAlert', {
+                    date: startIST.toISOString().split('T')[0],
+                    errorCount: currentDayErrors.length,
+                    threshold: 50,
+                    timestamp: new Date().toISOString(),
+                });
+            }
+
+        } catch (error) {
+            this.logger.error('❌ Failed to track error messages', error);
+
+            // Record failure in New Relic
+            newrelic.recordCustomEvent('DailyErrorMessageTracking', {
+                executionTime: new Date().toISOString(),
+                status: 'failed',
+                error: error.message,
+            });
+        }
     }
 
 

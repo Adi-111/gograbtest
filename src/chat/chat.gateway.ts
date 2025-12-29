@@ -34,6 +34,8 @@ import { CloudService } from 'src/cloud/cloud.service';
 import { FailedMessageDto } from './dto/failed-message.dto';
 
 import { updateIssueDto } from './dto/UpdateIssue.DTO';
+import { UpdateCaseDto } from 'src/cases/dto/update-case.dto';
+import { UpdatedCaseDto } from 'src/cases/dto/udpated-case.dto';
 
 @WebSocketGateway({
   cors: {
@@ -312,6 +314,24 @@ export class ChatGateway
       client.emit('error', { message: 'Internal server error. Please try again.' });
     }
   }
+  @SubscribeMessage('join-case-new')
+  async handleJoinCaseNew(client: Socket, payload: { caseId: number }): Promise<void> {
+    const { caseId } = payload;
+    try {
+      if (!caseId || typeof caseId !== 'number') throw new Error('Invalid case ID provided');
+      const caseExists = await this.prisma.case.findUnique({
+        where: { id: caseId },
+      });
+      if (!caseExists) throw new Error(`Case ${caseId} not found`);
+      const room = this.getRoomName(caseId);
+      await client.join(room);
+      this.trackConnection(client, caseId);
+      this.logger.log(`Client ${client.id} joined case ${caseId}`);
+
+    } catch (error) {
+      this.emitError(client, 'join-case-new', error);
+    }
+  }
 
 
   @SubscribeMessage('join-case')
@@ -331,6 +351,7 @@ export class ChatGateway
       this.trackConnection(client, caseId);
       this.logger.log(`Client ${client.id} joined case ${caseId}`);
       client.emit('join-success', { caseExists });
+
 
 
       // Emit the latest 50 messages as the initial page.
@@ -886,22 +907,58 @@ export class ChatGateway
             );
           }
         }
+        let updatedCase: UpdatedCaseDto
+        if (status === 'SOLVED') {
+          updatedCase = await this.prisma.case.update({
+            where: { id: caseId },
+            data: { status, lastBotNodeId: null, ...(assignedTo && { assignedTo }) },
+            select: {
+              id: true,
+              assignedTo: true,
+              tags: true,
+              customer: true,
+              user: true,
+              status: true,
+              messages: { orderBy: { timestamp: 'desc' }, take: 1 },
+              unread: true,
+              notes: { include: { user: true } },
+            }
+          })
 
-        const updatedCase = await this.prisma.case.update({
-          where: { id: caseId },
-          data: { status, lastBotNodeId: null, ...(assignedTo && { assignedTo }) },
-          select: {
-            id: true,
-            assignedTo: true,
-            tags: true,
-            customer: true,
-            user: true,
-            status: true,
-            messages: { orderBy: { timestamp: 'desc' }, take: 1 },
-            unread: true,
-            notes: { include: { user: true } },
-          },
-        });
+        } else {
+          updatedCase = await this.prisma.case.update({
+            where: { id: caseId },
+            data: { status, ...(assignedTo && { assignedTo }) },
+            select: {
+              id: true,
+              assignedTo: true,
+              tags: true,
+              customer: true,
+              user: true,
+              status: true,
+              messages: { orderBy: { timestamp: 'desc' }, take: 1 },
+              unread: true,
+              notes: { include: { user: true } },
+            }
+          })
+        }
+
+
+        // const updatedCase = await this.prisma.case.findUnique({
+        //   where: { id: caseId },
+
+        //   select: {
+        //     id: true,
+        //     assignedTo: true,
+        //     tags: true,
+        //     customer: true,
+        //     user: true,
+        //     status: true,
+        //     messages: { orderBy: { timestamp: 'desc' }, take: 1 },
+        //     unread: true,
+        //     notes: { include: { user: true } },
+        //   },
+        // });
         this.logger.debug(
           `Case updated (bot path) ${logCtx({
             caseId,
@@ -1052,21 +1109,43 @@ export class ChatGateway
 
 
 
-      const updatedCase = await this.prisma.case.update({
-        where: { id: caseId },
-        data: { status, lastBotNodeId: null, ...(assignedTo && { assignedTo }) },
-        select: {
-          id: true,
-          assignedTo: true,
-          tags: true,
-          customer: true,
-          user: true,
-          status: true,
-          messages: { orderBy: { timestamp: 'desc' }, take: 1 },
-          unread: true,
-          notes: { include: { user: true } },
-        },
-      });
+
+
+      let updatedCase: UpdatedCaseDto
+      if (status === 'SOLVED') {
+        updatedCase = await this.prisma.case.update({
+          where: { id: caseId },
+          data: { status, lastBotNodeId: null, ...(assignedTo && { assignedTo }) },
+          select: {
+            id: true,
+            assignedTo: true,
+            tags: true,
+            customer: true,
+            user: true,
+            status: true,
+            messages: { orderBy: { timestamp: 'desc' }, take: 1 },
+            unread: true,
+            notes: { include: { user: true } },
+          }
+        })
+
+      } else {
+        updatedCase = await this.prisma.case.update({
+          where: { id: caseId },
+          data: { status, ...(assignedTo && { assignedTo }) },
+          select: {
+            id: true,
+            assignedTo: true,
+            tags: true,
+            customer: true,
+            user: true,
+            status: true,
+            messages: { orderBy: { timestamp: 'desc' }, take: 1 },
+            unread: true,
+            notes: { include: { user: true } },
+          }
+        })
+      }
       this.logger.debug(
         `Case updated (user path) ${logCtx({
           caseId,
@@ -1181,44 +1260,8 @@ export class ChatGateway
       }
     }
   }
-  async handleUpdateContactStatus(
-    caseId: number,
-    status: Status,
-    userId: number,
-  ): Promise<any> {
-    const caseRecord = await this.prisma.case.findUnique({
-      where: { id: caseId },
-      select: { status: true },
-    });
-    if (!caseRecord) throw new Error('Case not found');
 
-    const updatedCase = await this.prisma.case.update({
-      where: { id: caseId },
-      data: { status, lastBotNodeId: null },
-      select: {
-        id: true,
-        assignedTo: true,
-        tags: true,
-        customer: true,
-        user: true,
-        status: true,
-        messages: { orderBy: { timestamp: 'desc' }, take: 1 },
-        unread: true,
-        notes: {
-          include: { user: true }
-        },
-      },
-    });
 
-    await this.recordStatusChange(caseId, userId, caseRecord.status, status);
-    const updatedEvents = await this.prisma.statusEvent.findMany({
-      where: { caseId },
-      include: { user: true },
-      orderBy: { timestamp: 'asc' },
-    });
-
-    return { updatedCase, updatedEvents };
-  }
 
   @SubscribeMessage('get-issue-events')
   async handleGetIssueEvents(client: Socket, payload: { caseId: number }) {

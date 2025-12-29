@@ -28,6 +28,137 @@ export class ChatService {
         this.chatGateway.broadcastNewCase(room);
     }
 
+    async joinCase(caseId: number, page: number = 1, limit: number = 20) {
+        try {
+            if (!caseId || typeof caseId !== 'number') {
+                throw new Error('Invalid case ID provided');
+            }
+
+            const pageNum = Math.max(1, page);
+            const limitNum = Math.min(Math.max(1, limit), 100); // Cap at 100
+            const skip = (pageNum - 1) * limitNum;
+
+            const caseExists = await this.prisma.case.findUnique({
+                where: { id: caseId },
+                include: { customer: true, user: true },
+            });
+
+            if (!caseExists) {
+                throw new Error(`Case ${caseId} not found`);
+            }
+
+            // Get total message count for pagination
+            const totalMessages = await this.prisma.message.count({
+                where: { caseId },
+            });
+
+            // Fetch paginated messages first
+            const messages = await this.prisma.message.findMany({
+                where: { caseId },
+                include: {
+                    user: true,
+                    bot: true,
+                    WhatsAppCustomer: true,
+                    media: true,
+                    location: true,
+                    interactive: true,
+                    case: true,
+                },
+                orderBy: { timestamp: 'desc' },
+                skip,
+                take: limitNum,
+            });
+
+            // Get the timestamp range from the fetched messages for filtering events
+            let issueEventsRaw = [];
+            let statusEvents = [];
+
+            if (messages.length > 0) {
+                const timestamps = messages.map(m => m.timestamp);
+                const minTimestamp = new Date(Math.min(...timestamps.map(t => t.getTime())));
+                // Use current time as upper bound to include events after the last message
+                const maxTimestamp = new Date();
+
+                // Fetch issue events and status events from minTimestamp onwards (including events after last message)
+                [issueEventsRaw, statusEvents] = await Promise.all([
+                    this.prisma.issueEvent.findMany({
+                        where: {
+                            caseId,
+                            status: 'CLOSED',
+                            closedAt: {
+                                gte: minTimestamp,
+                                lte: maxTimestamp,
+                            },
+                        },
+                        orderBy: { closedAt: 'asc' },
+                    }),
+                    this.prisma.statusEvent.findMany({
+                        where: {
+                            caseId,
+                            timestamp: {
+                                gte: minTimestamp,
+                                lte: maxTimestamp,
+                            },
+                        },
+                        include: { user: true },
+                        orderBy: { timestamp: 'asc' },
+                    }),
+                ]);
+            }
+
+            // Map issue events to include timestamp from closedAt
+            const issueEvents = issueEventsRaw.map(el => ({
+                ...el,
+                timestamp: el.closedAt,
+            }));
+
+            const totalPages = Math.ceil(totalMessages / limitNum);
+
+            return {
+                caseExists,
+                messages: messages.reverse(),
+                issueEvents,
+                statusEvents,
+                pagination: {
+                    page: pageNum,
+                    limit: limitNum,
+                    totalMessages,
+                    totalPages,
+                    hasNextPage: pageNum < totalPages,
+                    hasPrevPage: pageNum > 1,
+                },
+            };
+        } catch (error) {
+            const err = error as AxiosError<any>;
+
+            const meta = {
+                caseId,
+                page,
+                limit,
+                env: process.env.NODE_ENV,
+                appVersion: process.env.APP_VERSION,
+            };
+
+            // Report detailed error to New Relic
+            newrelic.noticeError(err, meta);
+
+            // Custom event for analytics
+            newrelic.recordCustomEvent("ChatJoinCaseFailure", {
+                type: "JoinCase",
+                error: err?.message,
+                stack: err?.stack,
+                ...meta,
+            });
+
+            // Increment metric counter
+            newrelic.incrementMetric("Custom/ChatJoinCase/Failures", 1);
+
+            // Log server-side
+            this.logger.error(`Error joining case ${caseId}: ${error.message}`);
+            throw error;
+        }
+    }
+
     async getChatList(
         payload?: {
             page?: number;
@@ -200,7 +331,107 @@ export class ChatService {
                 unreadCaseCount: unreadCaseCount,
             };
         } catch (error) {
+            const err = error as AxiosError<any>;
+
+            const meta = {
+                page: payload?.page,
+                limit: payload?.limit,
+                search: payload?.search,
+                status: payload?.status,
+                handler: payload?.handler,
+                tag: payload?.tag,
+                viewMode: payload?.viewMode,
+                byUserId: payload?.byUserId,
+                userId: payload?.userId,
+                env: process.env.NODE_ENV,
+                appVersion: process.env.APP_VERSION,
+            };
+
+            // Report detailed error to New Relic
+            newrelic.noticeError(err, meta);
+
+            // Custom event for analytics
+            newrelic.recordCustomEvent("ChatListFailure", {
+                type: "GetChatList",
+                error: err?.message,
+                stack: err?.stack,
+                ...meta,
+            });
+
+            // Increment metric counter
+            newrelic.incrementMetric("Custom/ChatList/Failures", 1);
+
+            // Log server-side
             this.logger.error('chatList error:', error);
+            throw error;
+        }
+    }
+
+    async getChatInfo(caseId: number) {
+        try {
+            const caseRecord = await this.prisma.case.findUnique({
+                where: { id: caseId },
+                select: {
+                    customer: { select: { name: true } },
+                    unread: true,
+                    status: true,
+                    assignedTo: true,
+                    currentIssueId: true,
+                    user: { select: { firstName: true } },
+                },
+            });
+
+            if (!caseRecord) {
+                return null;
+            }
+            const customer_name = caseRecord.customer.name
+
+            // Determine handler - fetch issue only if needed
+            let handler: string;
+            if (caseRecord.currentIssueId) {
+                const issue = await this.prisma.issueEvent.findUnique({
+                    where: { id: caseRecord.currentIssueId },
+                    select: { agentCalledAt: true, userId: true },
+                });
+                if (issue?.agentCalledAt && issue.userId === null) {
+                    handler = 'Not Assigned';
+                } else if (caseRecord.user) {
+                    handler = caseRecord.user.firstName;
+                } else {
+                    handler = caseRecord.assignedTo;
+                }
+            } else if (caseRecord.assignedTo === 'BOT' && caseRecord.status === 'INITIATED') {
+                handler = caseRecord.assignedTo;
+            } else if (caseRecord.user) {
+                handler = caseRecord.user.firstName;
+            } else {
+                handler = caseRecord.assignedTo;
+            }
+
+            return {
+                customer_name,
+                unread: caseRecord.unread,
+                handler,
+            };
+        } catch (error) {
+            const err = error as AxiosError<any>;
+
+            const meta = {
+                caseId,
+                env: process.env.NODE_ENV,
+                appVersion: process.env.APP_VERSION,
+            };
+
+            newrelic.noticeError(err, meta);
+            newrelic.recordCustomEvent("ChatInfoFailure", {
+                type: "GetChatInfo",
+                error: err?.message,
+                stack: err?.stack,
+                ...meta,
+            });
+            newrelic.incrementMetric("Custom/ChatInfo/Failures", 1);
+
+            this.logger.error(`getChatInfo error for case ${caseId}:`, error);
             throw error;
         }
     }
@@ -356,11 +587,11 @@ export class ChatService {
                 return { messageId: message.id, caseId: message.caseId };
             })
             // ----------------------------
-            // STEP 2: Fetch Message with Required Fields Only
+            // STEP 2: Fetch Full Message (Heavy Query)
             // ----------------------------
             const fullMessage: ChatEntity = await this.prisma.message.findUnique({
                 where: { id: messageId },
-                include: this.requiredMessageIncludes()
+                include: this.fullMessageIncludes()
             });
             if (!fullMessage) {
                 throw new Error("Message fetch failed after transaction.");
@@ -497,29 +728,6 @@ export class ChatService {
             replies: true,
 
             case: true,
-        };
-    }
-
-    /**
-     * Optimized includes for createMessage - only fetches fields required by:
-     * - notifyClients() for WebSocket emission
-     * - formatPreview() / getSenderInfo() for chat list updates
-     * - Callers that need message.id for status updates
-     * 
-     * Removed (not used in notifyClients or by callers):
-     * - bot: only botId needed, not full bot details
-     * - location: not used in notifyClients
-     * - contacts: not used in notifyClients
-     * - parentMessage: not used in notifyClients
-     * - replies: not used and always empty for newly created messages
-     * - case: fetched separately in notifyClients
-     */
-    private requiredMessageIncludes() {
-        return {
-            user: true,             // Needed for getSenderInfo (id, firstName, lastName)
-            WhatsAppCustomer: true, // Needed for getSenderInfo (id, name, phoneNo)
-            media: true,            // Needed for IMAGE/DOCUMENT message handling
-            interactive: true,      // Needed for INTERACTIVE message handling
         };
     }
 

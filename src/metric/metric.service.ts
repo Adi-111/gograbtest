@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AgentFRTQuery, AgentFRTSummary } from './types';
-import { IssueEventStatus, IssueType, RefundMode, SenderType } from '@prisma/client';
+import { IssueEventStatus, IssueType, MessageType, RefundMode, SenderType } from '@prisma/client';
 import { format } from 'date-fns/format';
 
 type IssueSummary = {
@@ -831,133 +831,136 @@ export class MetricService {
   }
 
 
+  /**
+   * Analyzes rating messages by cases to identify data integrity issues.
+   * Flow: Messages → Cases → User Analytics
+   * 
+   * @param from - Start date of the analysis period
+   * @param to - End date of the analysis period
+   * @returns Object containing:
+   *   - period: Date range for the analysis
+   *   - summary: Overall statistics (total cases, cases with ratings, messages sent, etc.)
+   *   - userTable: Per-agent breakdown with case analytics
+   */
+  async NotSendUnratedMessageIssues(from: Date, to: Date) {
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: {
+          in: [3, 6, 8]
+        }
+      },
+      select: { id: true, firstName: true, lastName: true },
+    });
 
-  async getAgentWiseUnratedIssues(fromIST: Date, toIST: Date) {
-    try {
-      // Step 1: Fetch all issues with userId in a single query (using openedAt to match CalculateUserWiseFRT)
-      const allIssues = await this.prisma.issueEvent.findMany({
+    const userAnalytics: any[] = [];
+    let totalCases = 0;
+    let totalWithRating = 0;
+    let totalWithMessage = 0;
+    let totalRatingButNoMsg = 0;
+
+    for (const user of users) {
+      // Step 1: Get all cases for this user created in the date range
+      const cases = await this.prisma.case.findMany({
         where: {
-          userId: { not: null },
-          openedAt: { gte: fromIST, lte: toIST },
+          userId: user.id,
+          createdAt: { gte: from, lte: to },
         },
         select: {
           id: true,
-          userId: true,
-          status: true,
+          issueEvents: {
+            where: {
+              status: IssueEventStatus.CLOSED,
+            },
+            select: {
+              id: true,
+              agentRating: true,
+              closedAt: true,
+            }
+          }
         }
       });
 
-      if (allIssues.length === 0) {
-        return {
-          data: [],
-          totalUnratedIssues: 0
-        };
+      const caseIds = cases.map(c => c.id);
+
+      if (caseIds.length === 0) {
+        userAnalytics.push({
+          agent: `${user.firstName} ${user.lastName}`,
+          totalCases: 0,
+          withRating: 0,
+          messageSent: 0,
+          ratingButNoMsg: 0,
+          msgRate: "0%"
+        });
+        continue;
       }
 
-      // Step 2: Fetch all messages for these issues that contain the rating text
-      const issueIds = allIssues.map(issue => issue.id);
+      // Step 2: Find rating messages for these cases
       const ratingMessages = await this.prisma.message.findMany({
         where: {
-          issueEventId: { in: issueIds },
-          text: { contains: 'How would you rate your experience with Go-Grab support' }
+          type: MessageType.INTERACTIVE,
+          text: { contains: 'How would you rate your experience' },
+          timestamp: { gte: from, lte: to },
+          caseId: { in: caseIds, not: null }
         },
         select: {
-          issueEventId: true,
+          id: true,
+          caseId: true,
         }
       });
 
-      // Create a Set of issue IDs that have the rating message sent
-      const issuesWithRatingMessage = new Set(
-        ratingMessages.map(msg => msg.issueEventId).filter(id => id !== null)
+      // Step 3: Extract unique case IDs that have rating messages
+      const caseIdsWithMessage = new Set(
+        ratingMessages.map(msg => msg.caseId).filter(id => id !== null) as number[]
       );
 
-      // Step 3: Aggregate metrics by agent in memory (more efficient than multiple DB queries)
-      const agentStatsMap = new Map<number, {
-        totalIssues: number;
-        closedIssues: number;
-        unratedClosedIssues: number;
-        openIssues: number;
-        ratedIssues: number;
-      }>();
+      // Step 4: Calculate user-specific metrics
+      const userCases = cases;
 
-      for (const issue of allIssues) {
-        const uid = issue.userId!;
+      // Cases where at least one issue has a rating
+      const userCasesWithRating = userCases.filter(c =>
+        c.issueEvents.some(issue => issue.agentRating !== null)
+      );
 
-        if (!agentStatsMap.has(uid)) {
-          agentStatsMap.set(uid, {
-            totalIssues: 0,
-            closedIssues: 0,
-            unratedClosedIssues: 0,
-            openIssues: 0,
-            ratedIssues: 0,
-          });
-        }
+      // Cases that have rating messages
+      const userCasesWithMessage = userCases.filter(c => caseIdsWithMessage.has(c.id));
 
-        const stats = agentStatsMap.get(uid)!;
-        stats.totalIssues++;
+      // Cases with ratings but no message sent
+      const userCasesWithRatingButNoMessage = userCasesWithRating.filter(
+        c => !caseIdsWithMessage.has(c.id)
+      );
 
-        if (issue.status === IssueEventStatus.CLOSED) {
-          stats.closedIssues++;
-          // Check if rating message was sent for this issue
-          if (issuesWithRatingMessage.has(issue.id)) {
-            stats.ratedIssues++;
-          } else {
-            stats.unratedClosedIssues++;
-          }
-        } else {
-          stats.openIssues++;
-        }
-      }
+      // Update overall totals
+      totalCases += userCases.length;
+      totalWithRating += userCasesWithRating.length;
+      totalWithMessage += userCasesWithMessage.length;
+      totalRatingButNoMsg += userCasesWithRatingButNoMessage.length;
 
-      // Step 4: Bulk fetch user details
-      const users = await this.prisma.user.findMany({
-        where: { id: { in: Array.from(agentStatsMap.keys()) } },
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true
-        }
+      // Push user result
+      userAnalytics.push({
+        agent: `${user.firstName} ${user.lastName}`,
+        totalCases: userCases.length,
+        withRating: userCasesWithRating.length,
+        messageSent: userCasesWithMessage.length,
+        ratingButNoMsg: userCasesWithRatingButNoMessage.length,
+        msgRate: userCasesWithRating.length > 0
+          ? `${Math.round((userCasesWithMessage.length / userCasesWithRating.length) * 100)}%`
+          : "0%"
       });
-
-      const userLookup = new Map(users.map(u => [u.id, u]));
-
-      // Step 5: Build flattened result matching the table format
-      const data = Array.from(agentStatsMap.entries())
-        .map(([uid, stats]) => {
-          const user = userLookup.get(uid);
-          return {
-            agentId: uid,
-            agentName: user ? `${user.firstName} ${user.lastName}` : 'Unknown',
-            email: user?.email || '',
-            totalIssues: stats.totalIssues,
-            closedIssues: stats.closedIssues,
-            unratedClosedIssues: stats.unratedClosedIssues,
-            openIssues: stats.openIssues,
-            ratedIssues: stats.ratedIssues,
-            unratedPercentage: stats.closedIssues > 0
-              ? Math.round((stats.unratedClosedIssues / stats.closedIssues) * 100)
-              : 0,
-          };
-        })
-        .sort((a, b) => b.unratedClosedIssues - a.unratedClosedIssues); // Sort by unrated count descending
-
-      const totalUnratedIssues = data.reduce((sum, agent) => sum + agent.unratedClosedIssues, 0);
-
-      return {
-        data,
-        totalUnratedIssues,
-        summary: {
-          totalAgents: data.length,
-          totalIssues: allIssues.length,
-          totalClosed: data.reduce((sum, agent) => sum + agent.closedIssues, 0),
-          totalOpen: data.reduce((sum, agent) => sum + agent.openIssues, 0),
-        }
-      };
-    } catch (error) {
-      this.logger.error('Error fetching agent-wise unrated issues', error);
-      throw error;
     }
-  }
-}
 
+    return {
+      period: `${from.toISOString().split('T')[0]} to ${to.toISOString().split('T')[0]}`,
+      summary: {
+        totalCases: totalCases,
+        casesWithRating: totalWithRating,
+        messagesSent: totalWithMessage,
+        ratingWithoutMessage: totalRatingButNoMsg,
+        messageRate: totalWithRating > 0
+          ? `${Math.round((totalWithMessage / totalWithRating) * 100)}%`
+          : "0%"
+      },
+      userTable: userAnalytics
+    };
+  }
+
+}

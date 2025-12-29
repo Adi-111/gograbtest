@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseIntPipe, Query } from "@nestjs/common";
+import { Controller, Get, NotFoundException, Param, ParseIntPipe, Query } from "@nestjs/common";
 import { ChatService } from "./chat.service";
 import { ChatEntity } from "./entity/chat.entity";
 import { ApiCreatedResponse, ApiResponseProperty } from "@nestjs/swagger";
@@ -43,6 +43,15 @@ export class ChatController {
         return await this.chatService.getMessagesByCaseId(id);
     }
 
+    @Get('join/:caseId')
+    async joinCase(
+        @Param('caseId', ParseIntPipe) caseId: number,
+        @Query('page') page?: number,
+        @Query('limit') limit?: number,
+    ) {
+        return await this.chatService.joinCase(caseId, page, limit);
+    }
+
 
     @Get('all')
     @ApiCreatedResponse({ type: [ChatEntity] })
@@ -64,5 +73,14 @@ export class ChatController {
     async getMachineDetails() {
         const data: MachineDetailsDto[] = await this.chatService.getMachineDetails();
         return data
+    }
+
+    @Get(':caseId/info')
+    async getChatInfo(@Param('caseId', ParseIntPipe) caseId: number) {
+        const chatInfo = await this.chatService.getChatInfo(caseId);
+        if (!chatInfo) {
+            throw new NotFoundException('Case not found');
+        }
+        return chatInfo;
     }
 }

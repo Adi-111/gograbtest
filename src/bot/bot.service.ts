@@ -1,3 +1,4 @@
+
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { CustomerService } from '../customer/customer.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -37,7 +38,7 @@ export class BotService {
         this.logger.log(node)
         if (!node) {
             this.logger.error(`Node not found`);
-            this.sendFallbackMessage(phoneNumber, caseId);
+            this.sendFallbackMessage(phoneNumber, caseId, 'system_error');
             return;
         }
 
@@ -65,7 +66,7 @@ export class BotService {
             }
         } catch (error) {
             this.logger.error(`Failed to process node`, error.stack);
-            await this.sendFallbackMessage(phoneNumber, caseId);
+            await this.sendFallbackMessage(phoneNumber, caseId, 'system_error');
         }
     }
 
@@ -101,7 +102,26 @@ export class BotService {
                 }
                 else if (node.nodeId === 'main_message-DqzXV') {
                     const caseRecord = await this.prisma.case.findUnique({ where: { id: caseId }, include: { customer: true } });
-                    await this.customerService.sendImageToCustomer(caseRecord.customer.phoneNo, 'https://i.ibb.co/Ld42zszm/qrcode.jpg', 'Qr Code')
+                    // Send QR code image via queue for consistency
+                    if (this.useQueue) {
+                        const qrMessage = await this.chatService.createMessage({
+                            text: 'Qr Code',
+                            type: MessageType.IMAGE,
+                            senderType: SenderType.BOT,
+                            caseId,
+                            systemStatus: SystemMessageStatus.SENT,
+                            recipient: caseRecord.customer.phoneNo,
+                        });
+                        await this.queueService.queueWhatsAppImage({
+                            phoneNo: caseRecord.customer.phoneNo,
+                            imageUrl: 'https://i.ibb.co/Ld42zszm/qrcode.jpg',
+                            caption: 'Qr Code',
+                            caseId,
+                            messageId: qrMessage.id,
+                        });
+                    } else {
+                        await this.customerService.sendImageToCustomer(caseRecord.customer.phoneNo, 'https://i.ibb.co/Ld42zszm/qrcode.jpg', 'Qr Code');
+                    }
                 }
                 else {
                     await this.prisma.case.update({
@@ -315,15 +335,26 @@ export class BotService {
         }
     }
 
-    public async sendFallbackMessage(phoneNumber: string, caseId: number): Promise<void> {
+    public async sendFallbackMessage(phoneNumber: string, caseId: number, fallbackType?: 'manual_reply' | 'unexpected_image' | 'system_error'): Promise<void> {
         try {
-            let botReply = await this.prisma.botReplies.findUnique({
-                where: {
-                    nodeId: "default"
-                }
-            });
+            let messageText: string;
 
-            const messageText = (botReply?.body as any)?.text || 'Oops! Something went wrong.';
+            // Determine the message based on fallback type
+            if (fallbackType === 'manual_reply') {
+                messageText = 'Please use the buttons provided to respond. Typing your answer manually is not supported at this step.';
+            } else if (fallbackType === 'unexpected_image') {
+                messageText = 'Images are not expected at this step. Please use the buttons provided to respond.';
+            } else if (fallbackType === 'system_error') {
+                messageText = 'Sorry, we encountered a technical issue. Please try again or contact support if the problem persists.';
+            } else {
+                // Default fallback behavior
+                let botReply = await this.prisma.botReplies.findUnique({
+                    where: {
+                        nodeId: "default"
+                    }
+                });
+                messageText = (botReply?.body as any)?.text || 'Oops! Something went wrong.';
+            }
             const message = {
                 text: messageText,
                 type: MessageType.TEXT,
@@ -352,7 +383,7 @@ export class BotService {
             }
 
             // Optional: restart from default node
-            botReply = await this.prisma.botReplies.findUnique({ where: { nodeId: 'hi' } });
+            const botReply = await this.prisma.botReplies.findUnique({ where: { nodeId: 'hi' } });
             if (botReply) {
                 await this.processNode(phoneNumber, botReply, caseId);
             }
@@ -550,4 +581,14 @@ export class BotService {
             data: { lastBotNodeId: 'hi' },
         });
     }
+    async sendOffTimeMessage(phoneNo: string, caseId: number) {
+        try {
+            await this.botSendByNodeId('off-time', phoneNo, caseId);
+        } catch (error) {
+            this.logger.error('Failed to send off-time message', error.stack);
+        }
+    }
 }
+
+
+

@@ -18,7 +18,8 @@ import { JwtStrategy } from './auth/strategies/jwt.strategy';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { QueueModule } from './queue/queue.module';
+import { QueueModule } from './queue';
+
 
 @Module({
   imports: [PrismaModule, UserModule, AuthModule, CasesModule, CustomerModule, ChatModule, BotModule, CloudModule, ScheduleModule.forRoot(), AnalyticsModule, CacheModule.register({
@@ -31,6 +32,7 @@ import { QueueModule } from './queue/queue.module';
       signOptions: { expiresIn: '7d' }, // token expiration
     }),
     QueueModule,
+
   ],
   providers: [Logger, CronService, JwtStrategy, {
     provide: 'APP_GUARD',

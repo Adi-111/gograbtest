@@ -49,7 +49,6 @@ export class CustomerController {
   }
 
 
-
   @Post('test-msg')
   async testMsgProccessing(@Body() body: any) {
     await this.customerService.processIncomingMessage(body);
@@ -87,19 +86,15 @@ export class CustomerController {
 
 
 
- 
-  // @Get('vend-info')
-  // async getVendInfo() {
-  //   const order_id = "ORDER-GG1080-1748595367706";
-  //   return await this.ggAppBackend.getVendDetails(order_id);
-  // }
-
-  // @Get('txn')
-  // async getProducts() {
-  //   return await this.ggAppBackend.bankTxn('');
-  // }
-
-  
+  @Get('vend-info')
+  async getVendInfo() {
+    const order_id = "ORDER-GG1080-1748595367706";
+    return await this.ggAppBackend.getVendDetails(order_id);
+  }
+  @Get('txn')
+  async getProducts() {
+    return await this.ggAppBackend.bankTxn('');
+  }
   @Get('customer-data-&&$$')
   async customerData() {
     return await this.ggAppBackend.getCustomerData();

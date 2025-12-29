@@ -9,11 +9,13 @@ export enum QueueName {
   WHATSAPP_BUTTONS = 'whatsapp-buttons',
   WHATSAPP_LIST = 'whatsapp-list',
   WHATSAPP_IMAGE = 'whatsapp-image',
+  WHATSAPP_DOCUMENT = 'whatsapp-document',
   SEND_TEMPLATE = 'send-template',
   PROCESS_REFUND = 'process-refund',
   SYNC_ANALYTICS = 'sync-analytics',
   NOTIFICATION = 'notification',
   BOT_MESSAGE = 'bot-message',
+  INCOMING_MESSAGE = 'incoming-message',
 }
 
 // Job payload types
@@ -56,6 +58,31 @@ export interface BotMessageJob {
   nodeId: string;
   phoneNo: string;
   caseId: number;
+}
+
+export interface WhatsAppDocumentJob {
+  phoneNo: string;
+  documentUrl: string;
+  fileName: string;
+  caption?: string;
+  caseId: number;
+  messageId?: number;
+}
+
+export interface IncomingMessageJob {
+  webhookBody: any;
+  receivedAt: string;
+}
+
+export interface DeadLetterJob {
+  originalQueue: string;
+  originalData: any;
+  error: {
+    message: string;
+    stack?: string;
+  };
+  attempts: number;
+  failedAt: string;
 }
 
 // Legacy - kept for backwards compatibility

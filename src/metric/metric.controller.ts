@@ -117,6 +117,7 @@ export class MetricController {
       previousTo
     });
   }
+
   @Get("agent-unrated-issues")
   async getAgentWiseUnratedIssues(
     @Query("preset") preset?: "today" | "1d" | "7d" | "30d",
@@ -124,7 +125,7 @@ export class MetricController {
     @Query("to") toStr?: string,
   ) {
     const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
-    return await this.metricService.getAgentWiseUnratedIssues(fromIST, toIST);
+    return await this.metricService.NotSendUnratedMessageIssues(fromIST, toIST);
   }
 
 

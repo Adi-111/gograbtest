@@ -1,6 +1,7 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosError } from 'axios';
 import { CaseHandler, Status, MessageType, SenderType, ReplyType, Prisma } from '@prisma/client';
+import * as newrelic from 'newrelic';
 import { ChatService } from 'src/chat/chat.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { BotService } from 'src/bot/bot.service';
@@ -10,6 +11,7 @@ import { TransactionInfoDto } from './gg-backend/dto/transaction-info.dto';
 import { MergedProductDetail } from './types';
 import { WAComponent } from './dto/send-template.dto';
 import { MachineDto } from './gg-backend/dto/machine.dto';
+import { QueueService } from 'src/queue';
 
 
 
@@ -69,6 +71,16 @@ export class CustomerService {
     private readonly apiUrl = `https://graph.facebook.com/${this.facebookApiVersion}/${this.phoneNumberId}/messages`;
     private readonly accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
 
+    /**
+     * Checks if current time is between 9 PM UTC and 3 AM UTC (off-time)
+     */
+    private isOffTime(): boolean {
+        const now = new Date();
+        const hour = now.getUTCHours();
+        // Off-time: 9 PM (21:00) to 3 AM (03:00) UTC
+        return hour >= 21 || hour < 3;
+    }
+
 
     constructor(
         @Inject(forwardRef(() => ChatService))
@@ -77,7 +89,8 @@ export class CustomerService {
         private readonly botService: BotService,
         private readonly prisma: PrismaService,
         private readonly cloudService: CloudService,
-        private readonly gg_backend_service: GGBackendService
+        private readonly gg_backend_service: GGBackendService,
+        private readonly queueService: QueueService
     ) { }
 
 
@@ -120,52 +133,82 @@ export class CustomerService {
     }
 
     private async handleRefundRetry(caseId: number, phoneNo: string, nodeId: string) {
-        const maxTries = 3
-        const caseRecord = await this.prisma.case.findUnique({ where: { id: caseId } });
-        let caseMeta = (caseRecord?.meta ?? {}) as Prisma.JsonObject;
-        const tries = Number(caseMeta.refundScreenshotTries) || 0;
-        const updatedTries = tries + 1;
+        try {
+            const maxTries = 3
+            const caseRecord = await this.prisma.case.findUnique({ where: { id: caseId } });
+            let caseMeta = (caseRecord?.meta ?? {}) as Prisma.JsonObject;
+            const tries = Number(caseMeta.refundScreenshotTries) || 0;
+            const updatedTries = tries + 1;
 
-        caseMeta = {
-            ...caseMeta,
-            refundScreenshotTries: updatedTries,
-        };
+            caseMeta = {
+                ...caseMeta,
+                refundScreenshotTries: updatedTries,
+            };
 
-        if (updatedTries >= maxTries) {
+            if (updatedTries >= maxTries) {
 
-            await this.botService.botSendByNodeId('screenshot4', phoneNo, caseId);
-            await this.prisma.case.update({
-                where: { id: caseId },
-                data: {
-                    assignedTo: CaseHandler.BOT,
-                    meta: { refundScreenshotTries: 0, refundScreenshotActive: false },
-                    lastBotNodeId: null,
-                },
-            });
-            this.logger.warn(`Refund Screenshot failed ${maxTries} times. Escalated to human agent. Screenshot flow reset.`);
-        }
-        else {
-            await this.botService.botSendByNodeId(nodeId, phoneNo, caseId);
-            if (nodeId === 'screenshot2') {
+                await this.botService.botSendByNodeId('screenshot4', phoneNo, caseId);
                 await this.prisma.case.update({
                     where: { id: caseId },
                     data: {
-                        assignedTo: 'USER',
+                        assignedTo: CaseHandler.BOT,
                         meta: { refundScreenshotTries: 0, refundScreenshotActive: false },
-                        lastBotNodeId: 'stop',
-                    }
-                })
-            }
-            else {
-                await this.prisma.case.update({
-                    where: { id: caseId },
-                    data: {
-                        meta: caseMeta,
-                        lastBotNodeId: 'main_question-fXmet', // <=========================== important fix
+                        lastBotNodeId: null,
                     },
                 });
+                this.logger.warn(`Refund Screenshot failed ${maxTries} times. Escalated to human agent. Screenshot flow reset.`);
             }
-            this.logger.warn(`Retry ${updatedTries}/${maxTries} for refund screenshot.`);
+            else {
+                await this.botService.botSendByNodeId(nodeId, phoneNo, caseId);
+                if (nodeId === 'screenshot2') {
+                    await this.prisma.case.update({
+                        where: { id: caseId },
+                        data: {
+                            assignedTo: 'USER',
+                            meta: { refundScreenshotTries: 0, refundScreenshotActive: false },
+                            lastBotNodeId: 'stop',
+                        }
+                    })
+                }
+                else {
+                    await this.prisma.case.update({
+                        where: { id: caseId },
+                        data: {
+                            meta: caseMeta,
+                            lastBotNodeId: 'main_question-fXmet', // <=========================== important fix
+                        },
+                    });
+                }
+                this.logger.warn(`Retry ${updatedTries}/${maxTries} for refund screenshot.`);
+            }
+        } catch (error) {
+            const err = error as AxiosError<any>;
+
+            const meta = {
+                caseId,
+                phoneNo,
+                nodeId,
+                env: process.env.NODE_ENV,
+                appVersion: process.env.APP_VERSION,
+            };
+
+            // Report detailed error to New Relic
+            newrelic.noticeError(err, meta);
+
+            // Custom event for analytics
+            newrelic.recordCustomEvent("RefundRetryFailure", {
+                type: "HandleRefundRetry",
+                error: err?.message,
+                stack: err?.stack,
+                ...meta,
+            });
+
+            // Increment metric counter
+            newrelic.incrementMetric("Custom/RefundRetry/Failures", 1);
+
+            // Log server-side
+            this.logger.error(`Error in handleRefundRetry for case ${caseId}: ${error.message}`);
+            throw error;
         }
     }
 
@@ -218,6 +261,28 @@ export class CustomerService {
                     throw new Error(`Unsupported message type: ${payload.type}`);
             }
         } catch (error) {
+            const err = error as AxiosError<any>;
+
+            const meta = {
+                to,
+                messageType: payload.type,
+                hasText: !!payload.text,
+                hasBody: !!payload.body,
+                hasButtons: !!payload.buttons,
+                hasSections: !!payload.sections,
+                env: process.env.NODE_ENV,
+                appVersion: process.env.APP_VERSION,
+            };
+
+            newrelic.noticeError(err, meta);
+            newrelic.recordCustomEvent("WhatsAppMessageFailure", {
+                type: "SendMessageToWhatsappCustomer",
+                error: err?.message,
+                stack: err?.stack,
+                ...meta,
+            });
+            newrelic.incrementMetric("Custom/WhatsAppMessage/Failures", 1);
+
             this.logger.error(
                 `Failed to send WhatsApp message to ${to}`,
                 (error as Error).stack
@@ -226,13 +291,201 @@ export class CustomerService {
         }
     }
 
-    // Message Processing (without transaction)
+    // ─────────────────────────────────────────────────────────────
+    // Queue-based outgoing message methods (for better performance)
+    // ─────────────────────────────────────────────────────────────
+
+    async queueTextMessage(
+        phoneNo: string,
+        text: string,
+        caseId: number,
+        messageId: number = 0
+    ): Promise<string | null> {
+        return this.queueService.queueWhatsAppText({
+            phoneNo,
+            text,
+            caseId,
+            messageId,
+        });
+    }
+
+    async queueButtonsMessage(
+        phoneNo: string,
+        config: {
+            header?: string;
+            body: string;
+            footer?: string;
+            buttons: Array<{ id: string; title: string }>;
+        },
+        caseId: number,
+        messageId: number = 0
+    ): Promise<string | null> {
+        return this.queueService.queueWhatsAppButtons({
+            phoneNo,
+            ...config,
+            caseId,
+            messageId,
+        });
+    }
+
+    async queueListMessage(
+        phoneNo: string,
+        config: {
+            body: string;
+            buttonText: string;
+            footer?: string;
+            sections: any[];
+        },
+        caseId: number,
+        messageId: number = 0
+    ): Promise<string | null> {
+        return this.queueService.queueWhatsAppList({
+            phoneNo,
+            ...config,
+            caseId,
+            messageId,
+        });
+    }
+
+    async queueImageMessage(
+        phoneNo: string,
+        imageUrl: string,
+        caseId: number,
+        caption?: string,
+        messageId?: number
+    ): Promise<string | null> {
+        return this.queueService.queueWhatsAppImage({
+            phoneNo,
+            imageUrl,
+            caption,
+            caseId,
+            messageId,
+        });
+    }
+
+    async queueDocumentMessage(
+        phoneNo: string,
+        documentUrl: string,
+        fileName: string,
+        caseId: number,
+        caption?: string,
+        messageId?: number
+    ): Promise<string | null> {
+        return this.queueService.queueWhatsAppDocument({
+            phoneNo,
+            documentUrl,
+            fileName,
+            caption,
+            caseId,
+            messageId,
+        });
+    }
+
+    async queueBotMessage(
+        nodeId: string,
+        phoneNo: string,
+        caseId: number
+    ): Promise<string | null> {
+        return this.queueService.queueBotMessage({
+            nodeId,
+            phoneNo,
+            caseId,
+        });
+    }
+
+    // Message Processing - Queue the message for async processing
     async processIncomingMessage(body: any) {
         const entry = body?.entry?.[0];
         const changes = entry?.changes?.[0];
         const value = changes?.value;
         const message = value?.messages?.[0];
 
+        // Handle status webhooks synchronously (they're lightweight)
+        if (value?.statuses) {
+            return this.handleStatusWebhook(value);
+        }
+
+        if (!message) {
+            this.logger.warn('Invalid message structure, skipping...', body);
+            return null;
+        }
+
+        // Quick validation before queueing
+        const currentTime = Math.floor(Date.now() / 1000);
+        const messageTimestamp = parseInt(message.timestamp);
+
+        if (currentTime - messageTimestamp > 15) {
+            this.logger.warn(`Skipping old message. Message timestamp: ${messageTimestamp}, Current timestamp: ${currentTime}`);
+            return null;
+        }
+
+        // Queue the message for async processing
+        try {
+            const jobId = await this.queueService.queueIncomingMessage({
+                webhookBody: body,
+                receivedAt: new Date().toISOString(),
+            });
+            this.logger.log(`Queued incoming message [${message.id}] with job ID: ${jobId}`);
+            return { queued: true, jobId, messageId: message.id };
+        } catch (error) {
+            this.logger.error('Failed to queue incoming message, processing synchronously', error);
+            // Fallback to synchronous processing if queue fails
+            return this.processIncomingMessageFromQueue(body);
+        }
+    }
+
+    // Handle status webhooks (sent/delivered/read/failed)
+    private async handleStatusWebhook(value: any) {
+        if (value?.statuses?.[0]?.status === 'failed') {
+            const phoneNo = value?.statuses?.[0]?.recipient_id;
+            const existingCustomer = await this.prisma.whatsAppCustomer.findFirst({
+                where: { phoneNo },
+            });
+            if (!existingCustomer) {
+                this.logger.warn(`No customer found with phone number ${phoneNo}`);
+                return null;
+            }
+            const activeCase = await this.prisma.case.findFirst({
+                where: {
+                    customerId: existingCustomer.id
+                },
+                include: {
+                    messages: {
+                        take: 1,
+                        orderBy: {
+                            timestamp: 'desc'
+                        }
+                    }
+                }
+            });
+            if (!activeCase) return null;
+
+            const event = await this.prisma.failedMsgEvent.create({
+                data: {
+                    tries: 0,
+                    text: value?.statuses?.[0]?.errors?.[0]?.message,
+                    messageId: activeCase.messages[0].id,
+                    user: { connect: { id: 5 } },
+                    case: { connect: { id: activeCase.id } },
+                },
+                include: {
+                    case: true,
+                    user: true
+                }
+            });
+
+            await this.chatService.triggerFailedMessage(event);
+        }
+        this.logger.warn('Skipping WhatsApp status webhook (sent/delivered/read)');
+        return null;
+    }
+
+    // Actual message processing (called from queue processor)
+    async processIncomingMessageFromQueue(body: any) {
+        const entry = body?.entry?.[0];
+        const changes = entry?.changes?.[0];
+        const value = changes?.value;
+        const message = value?.messages?.[0];
 
         if (message?.type === 'reaction') {
             // WhatsApp Cloud API reaction payload typically contains: reaction: { emoji, message_id, action }
@@ -247,62 +500,11 @@ export class CustomerService {
             changes.value.messages[0] = normalized;
         }
 
-        if (value?.statuses) {
-            if (value?.statuses[0]?.status === 'failed') {
-                const phoneNo = value?.statuses[0]?.recipient_id
-                const existingCustomer = await this.prisma.whatsAppCustomer.findFirst({
-                    where: { phoneNo },
-                });
-                if (!existingCustomer) {
-                    this.logger.warn(`No customer found with phone number ${phoneNo}`)
-                    return null;
-                }
-                const activeCase = await this.prisma.case.findFirst({
-                    where: {
-                        customerId: existingCustomer.id
-                    },
-                    include: {
-                        messages: {
-                            take: 1,
-                            orderBy: {
-                                timestamp: 'desc'
-                            }
-                        }
-                    }
-                });
-                if (!activeCase) return null;
-
-                const event = await this.prisma.failedMsgEvent.create({
-                    data: {
-                        tries: 0,
-                        text: value?.statuses?.[0]?.errors?.[0]?.message,
-                        messageId: activeCase.messages[0].id,
-                        user: { connect: { id: 5 } },
-                        case: { connect: { id: activeCase.id } },
-                    },
-
-                    include: {
-                        case: true,
-                        user: true
-                    }
-                })
-
-                await this.chatService.triggerFailedMessage(event);
-            }
-            this.logger.warn('Skipping WhatsApp status webhook (sent/delivered/read)');
-            return null;
-        }
         if (!message) {
-            this.logger.warn('Invalid message structure, skipping...', body);
+            this.logger.warn('Invalid message structure in queue, skipping...', body);
             return null;
         }
-        const currentTime = Math.floor(Date.now() / 1000); // Current UNIX time in seconds
-        const messageTimestamp = parseInt(message.timestamp); // WhatsApp timestamp is also in seconds
 
-        if (currentTime - messageTimestamp > 15) {
-            this.logger.warn(`Skipping old message. Message timestamp: ${messageTimestamp}, Current timestamp: ${currentTime}`);
-            return null;
-        }
         const phoneNo = String(message.from);
         const contact = value?.contacts?.[0];
 
@@ -311,6 +513,25 @@ export class CustomerService {
             const caseRecord = await this.handleCaseManagement(customer.id);
             const storedMessage = await this.storeIncomingMessage(message, customer.id, caseRecord.id);
             await this.handleTimer(caseRecord.id);
+
+            // Check if it's off-time (9 PM UTC to 3 AM UTC) and send off-time message for specific bot nodes
+            const offTimeNodeIds = [
+                'main_buttons-hSJwk',
+                'main_question-sZPbm',
+                'main_question-nyJZr',
+                'main_question-FyKfq',
+                'screenshot2',
+                'screenshot5',
+                'screenshot9',
+                'screenshot-cancelled'
+            ];
+
+            if (this.isOffTime() && caseRecord.lastBotNodeId && offTimeNodeIds.includes(caseRecord.lastBotNodeId)) {
+                this.logger.log(`Off-time detected (9 PM - 3 AM UTC). Sending off-time message for case ${caseRecord.id} at node ${caseRecord.lastBotNodeId}`);
+                await this.botService.sendOffTimeMessage(phoneNo, caseRecord.id);
+                return { customer, case: caseRecord };
+            }
+
             const lastBotNodeId = caseRecord.lastBotNodeId || '';
             const onButtons = lastBotNodeId.startsWith('main_buttons')
             this.logger.log("onButtons", onButtons);
@@ -382,7 +603,7 @@ export class CustomerService {
                     ) {
                         if (!greetings.some(greet => message.text?.body.includes(greet)) && message.text?.body !== 'hi') {
                             this.logger.warn(`User replied manually instead of using interactive buttons. Sending fallback. lastNodeId: ${caseRecord.lastBotNodeId}`);
-                            await this.botService.sendFallbackMessage(phoneNo, caseRecord.id);
+                            await this.botService.sendFallbackMessage(phoneNo, caseRecord.id, 'manual_reply');
                             return { customer, case: caseRecord };
                         }
 
@@ -393,10 +614,10 @@ export class CustomerService {
 
                     if (
                         message.type === 'image' &&
-                        caseRecord.lastBotNodeId !== 'main_question-fXmet' && caseRecord.lastBotNodeId !== 'on-wa'
+                        caseRecord.lastBotNodeId !== 'main_question-fXmet' && caseRecord.lastBotNodeId !== 'on-wa' && caseRecord.lastBotNodeId !== 'main_question-BPjjT'
                     ) {
                         this.logger.warn(`Image received when expecting interactive response. Sending fallback.`);
-                        await this.botService.sendFallbackMessage(phoneNo, caseRecord.id)
+                        await this.botService.sendFallbackMessage(phoneNo, caseRecord.id, 'unexpected_image')
                         return { customer, case: caseRecord }; // stop further processing
                     }
 
@@ -785,9 +1006,9 @@ export class CustomerService {
                 this.logger.log("welcome1")
                 await this.botService.sendWelcomeMsg(customer.phoneNo, newCase.id);
                 await this.chatService.broadcastNewCase(newCase);
-                if (this.isCurrentTimeBetween()) {
-                    await this.botService.botSendByNodeId('off-time', customer.phoneNo, newCase.id);
-                }
+                // if (this.isCurrentTimeBetween()) {
+                //     await this.botService.botSendByNodeId('off-time', customer.phoneNo, newCase.id);
+                // }
             }
             // 
             const issueEvent = await this.prisma.issueEvent.create({
