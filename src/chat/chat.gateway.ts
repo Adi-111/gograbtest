@@ -1166,7 +1166,7 @@ export class ChatGateway
       const updatedEvents = await this.prisma.statusEvent.findMany({
         where: { caseId },
         include: { user: true },
-        orderBy: { timestamp: 'asc' },
+        orderBy: { timestamp: 'desc' },
       });
       this.logger.debug(
         `Fetched status events (user path) ${logCtx({

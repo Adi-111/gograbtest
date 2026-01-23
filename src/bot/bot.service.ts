@@ -380,13 +380,14 @@ export class BotService {
                     where: { id: savedMessage.id },
                     data: { systemStatus: SystemMessageStatus.DELIVERED },
                 });
+                const botReply = await this.prisma.botReplies.findUnique({ where: { nodeId: 'hi' } });
+                if (botReply) {
+                    await this.processNode(phoneNumber, botReply, caseId);
+                }
             }
 
             // Optional: restart from default node
-            const botReply = await this.prisma.botReplies.findUnique({ where: { nodeId: 'hi' } });
-            if (botReply) {
-                await this.processNode(phoneNumber, botReply, caseId);
-            }
+
 
         } catch (error) {
             this.logger.error('Failed to send fallback message', error.stack);

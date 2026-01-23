@@ -141,140 +141,209 @@ export class CronService {
 
 
     /**
-     * Daily cron job to track "Oops! Something went wrong." error messages
+     * Daily cron job to track all fallback messages by type
      * Sends both current day and historical data to New Relic
      * Runs every hour and reports on the current business day (4AM IST → 4AM IST)
      */
     @Cron(CronExpression.EVERY_HOUR)
     async trackErrorMessages() {
         try {
-            this.logger.log('🔍 Starting error message tracking (Oops! Something went wrong.)...');
+            this.logger.log('🔍 Starting fallback message tracking (all types)...');
 
             const { startUtc, endUtc, startIST, endIST } = this.getIST4amWindow();
 
             this.logger.log(
-                `⏳ Error tracking window IST: ${startIST.toISOString()} → ${endIST.toISOString()}`
+                `⏳ Fallback tracking window IST: ${startIST.toISOString()} → ${endIST.toISOString()}`
             );
 
-            // Get error messages for current business day
-            const currentDayErrors = await this.prisma.message.findMany({
-                where: {
-                    text: { contains: 'Oops! Something went wrong.', mode: 'insensitive' },
-                    timestamp: { gte: startUtc, lte: endUtc },
-                },
-                select: {
-                    id: true,
-                    timestamp: true,
-                    caseId: true,
-                    recipient: true,
-                    senderType: true,
-                },
-                orderBy: { timestamp: 'asc' },
-            });
+            // Define fallback message types
+            const fallbackTypes = {
+                manual_reply: 'Please use the buttons provided to respond. Typing your answer manually is not supported at this step.',
+                unexpected_image: 'Images are not expected at this step. Please use the buttons provided to respond.',
+                system_error: 'Sorry, we encountered a technical issue. Please try again or contact support if the problem persists.',
+                default_error: 'Oops! Something went wrong.',
+            };
 
-            // Get total historical count (all time before current business day)
-            const historicalErrorCount = await this.prisma.message.count({
-                where: {
-                    text: { contains: 'Oops! Something went wrong.', mode: 'insensitive' },
-                    timestamp: { lt: startUtc },
-                },
-            });
+            // Track metrics for each fallback type
+            const fallbackMetrics: Record<string, any> = {};
+            let totalCurrentDayFallbacks = 0;
+            let totalHistoricalFallbacks = 0;
+            let totalAllTimeFallbacks = 0;
+            const allAffectedCases = new Set<number>();
+            const allAffectedCustomers = new Set<string>();
 
-            // Get total count including current day
-            const totalErrorCount = await this.prisma.message.count({
-                where: {
-                    text: { contains: 'Oops! Something went wrong.', mode: 'insensitive' },
-                },
-            });
+            // Process each fallback type
+            for (const [type, messageText] of Object.entries(fallbackTypes)) {
+                // Get current day fallbacks
+                const currentDayFallbacks = await this.prisma.message.findMany({
+                    where: {
+                        text: { contains: messageText, mode: 'insensitive' },
+                        timestamp: { gte: startUtc, lte: endUtc },
+                    },
+                    select: {
+                        id: true,
+                        timestamp: true,
+                        caseId: true,
+                        recipient: true,
+                        senderType: true,
+                    },
+                    orderBy: { timestamp: 'asc' },
+                });
 
-            // Group current day errors by hour for better insights
-            const errorsByHour: Record<number, number> = {};
-            currentDayErrors.forEach((msg) => {
-                const istTime = new Date(msg.timestamp.getTime() + IST_OFFSET_MS);
-                const hour = istTime.getUTCHours();
-                errorsByHour[hour] = (errorsByHour[hour] || 0) + 1;
-            });
+                // Get historical count
+                const historicalCount = await this.prisma.message.count({
+                    where: {
+                        text: { contains: messageText, mode: 'insensitive' },
+                        timestamp: { lt: startUtc },
+                    },
+                });
 
-            // Get unique cases affected today
-            const uniqueCasesAffected = new Set(
-                currentDayErrors.map((msg) => msg.caseId).filter((id) => id !== null)
-            ).size;
+                // Get total count
+                const totalCount = await this.prisma.message.count({
+                    where: {
+                        text: { contains: messageText, mode: 'insensitive' },
+                    },
+                });
 
-            // Get unique customers affected today
-            const uniqueCustomersAffected = new Set(
-                currentDayErrors.map((msg) => msg.recipient).filter((r) => r !== null)
-            ).size;
+                // Collect affected cases and customers
+                currentDayFallbacks.forEach((msg) => {
+                    if (msg.caseId) allAffectedCases.add(msg.caseId);
+                    if (msg.recipient) allAffectedCustomers.add(msg.recipient);
+                });
 
-            // Send comprehensive data to New Relic
-            newrelic.recordCustomEvent('DailyErrorMessageTracking', {
-                // Current business day metrics
-                currentDayErrorCount: currentDayErrors.length,
-                currentDayDate: startIST.toISOString().split('T')[0],
+                // Group by hour
+                const fallbacksByHour: Record<number, number> = {};
+                currentDayFallbacks.forEach((msg) => {
+                    const istTime = new Date(msg.timestamp.getTime() + IST_OFFSET_MS);
+                    const hour = istTime.getUTCHours();
+                    fallbacksByHour[hour] = (fallbacksByHour[hour] || 0) + 1;
+                });
 
-                // Historical metrics
-                historicalErrorCount,
-                totalErrorCount,
+                // Store metrics
+                fallbackMetrics[type] = {
+                    currentDay: currentDayFallbacks.length,
+                    historical: historicalCount,
+                    total: totalCount,
+                    byHour: fallbacksByHour,
+                };
+
+                // Update totals
+                totalCurrentDayFallbacks += currentDayFallbacks.length;
+                totalHistoricalFallbacks += historicalCount;
+                totalAllTimeFallbacks += totalCount;
+
+                // Send type-specific event to New Relic
+                newrelic.recordCustomEvent('FallbackMessageByType', {
+                    fallbackType: type,
+                    currentDayCount: currentDayFallbacks.length,
+                    historicalCount,
+                    totalCount,
+                    date: startIST.toISOString().split('T')[0],
+                    windowStartIST: startIST.toISOString(),
+                    windowEndIST: endIST.toISOString(),
+                    timestamp: new Date().toISOString(),
+                });
+
+                // Send hourly distribution for this type
+                if (currentDayFallbacks.length > 0) {
+                    Object.entries(fallbacksByHour).forEach(([hour, count]) => {
+                        newrelic.recordCustomEvent('FallbackMessageHourlyByType', {
+                            fallbackType: type,
+                            date: startIST.toISOString().split('T')[0],
+                            hourIST: parseInt(hour),
+                            count,
+                            timestamp: new Date().toISOString(),
+                        });
+                    });
+                }
+
+                // Record metrics for dashboard
+                newrelic.recordMetric(`Custom/FallbackMessages/${type}/CurrentDay`, currentDayFallbacks.length);
+                newrelic.recordMetric(`Custom/FallbackMessages/${type}/Historical`, historicalCount);
+                newrelic.recordMetric(`Custom/FallbackMessages/${type}/Total`, totalCount);
+            }
+
+            // Send comprehensive summary event
+            newrelic.recordCustomEvent('DailyFallbackMessageSummary', {
+                // Aggregate metrics
+                totalCurrentDayFallbacks,
+                totalHistoricalFallbacks,
+                totalAllTimeFallbacks,
+
+                // By type breakdown
+                manualReplyCurrentDay: fallbackMetrics.manual_reply.currentDay,
+                unexpectedImageCurrentDay: fallbackMetrics.unexpected_image.currentDay,
+                systemErrorCurrentDay: fallbackMetrics.system_error.currentDay,
+                defaultErrorCurrentDay: fallbackMetrics.default_error.currentDay,
 
                 // Impact metrics
-                uniqueCasesAffectedToday: uniqueCasesAffected,
-                uniqueCustomersAffectedToday: uniqueCustomersAffected,
+                uniqueCasesAffectedToday: allAffectedCases.size,
+                uniqueCustomersAffectedToday: allAffectedCustomers.size,
 
-                // Time window
+                // Metadata
+                currentDayDate: startIST.toISOString().split('T')[0],
                 windowStartIST: startIST.toISOString(),
                 windowEndIST: endIST.toISOString(),
-
-                // Execution metadata
                 executionTime: new Date().toISOString(),
                 status: 'success',
             });
 
-            // Send hourly distribution as separate events for better analysis
-            if (currentDayErrors.length > 0) {
-                Object.entries(errorsByHour).forEach(([hour, count]) => {
-                    newrelic.recordCustomEvent('ErrorMessageHourlyDistribution', {
-                        date: startIST.toISOString().split('T')[0],
-                        hourIST: parseInt(hour),
-                        errorCount: count,
-                        timestamp: new Date().toISOString(),
-                    });
-                });
-            }
-
-            // Record metrics for dashboard
-            newrelic.recordMetric('Custom/ErrorMessages/CurrentDay', currentDayErrors.length);
-            newrelic.recordMetric('Custom/ErrorMessages/Historical', historicalErrorCount);
-            newrelic.recordMetric('Custom/ErrorMessages/Total', totalErrorCount);
-            newrelic.recordMetric('Custom/ErrorMessages/CasesAffectedToday', uniqueCasesAffected);
-            newrelic.recordMetric('Custom/ErrorMessages/CustomersAffectedToday', uniqueCustomersAffected);
+            // Record aggregate metrics
+            newrelic.recordMetric('Custom/FallbackMessages/Total/CurrentDay', totalCurrentDayFallbacks);
+            newrelic.recordMetric('Custom/FallbackMessages/Total/Historical', totalHistoricalFallbacks);
+            newrelic.recordMetric('Custom/FallbackMessages/Total/AllTime', totalAllTimeFallbacks);
+            newrelic.recordMetric('Custom/FallbackMessages/CasesAffectedToday', allAffectedCases.size);
+            newrelic.recordMetric('Custom/FallbackMessages/CustomersAffectedToday', allAffectedCustomers.size);
 
             this.logger.log(
-                `✅ Error message tracking complete:
-                - Current day: ${currentDayErrors.length} errors
-                - Historical: ${historicalErrorCount} errors
-                - Total: ${totalErrorCount} errors
-                - Cases affected today: ${uniqueCasesAffected}
-                - Customers affected today: ${uniqueCustomersAffected}`
+                `✅ Fallback message tracking complete:
+                - Total current day: ${totalCurrentDayFallbacks} fallbacks
+                  • Manual reply: ${fallbackMetrics.manual_reply.currentDay}
+                  • Unexpected image: ${fallbackMetrics.unexpected_image.currentDay}
+                  • System error: ${fallbackMetrics.system_error.currentDay}
+                  • Default error: ${fallbackMetrics.default_error.currentDay}
+                - Total historical: ${totalHistoricalFallbacks} fallbacks
+                - Total all-time: ${totalAllTimeFallbacks} fallbacks
+                - Cases affected today: ${allAffectedCases.size}
+                - Customers affected today: ${allAffectedCustomers.size}`
             );
 
-            // Log warning if error count is unusually high
-            if (currentDayErrors.length > 50) {
+            // Log warning if total fallback count is unusually high
+            if (totalCurrentDayFallbacks > 50) {
                 this.logger.warn(
-                    `⚠️ High error message count detected today: ${currentDayErrors.length} errors`
+                    `⚠️ High fallback message count detected today: ${totalCurrentDayFallbacks} fallbacks`
                 );
 
-                newrelic.recordCustomEvent('HighErrorMessageAlert', {
+                newrelic.recordCustomEvent('HighFallbackMessageAlert', {
                     date: startIST.toISOString().split('T')[0],
-                    errorCount: currentDayErrors.length,
+                    totalFallbackCount: totalCurrentDayFallbacks,
+                    manualReply: fallbackMetrics.manual_reply.currentDay,
+                    unexpectedImage: fallbackMetrics.unexpected_image.currentDay,
+                    systemError: fallbackMetrics.system_error.currentDay,
+                    defaultError: fallbackMetrics.default_error.currentDay,
                     threshold: 50,
                     timestamp: new Date().toISOString(),
                 });
             }
 
+            // Log specific warnings for concerning patterns
+            if (fallbackMetrics.system_error.currentDay > 10) {
+                this.logger.warn(
+                    `⚠️ High system error count: ${fallbackMetrics.system_error.currentDay} - investigate technical issues`
+                );
+            }
+
+            if (fallbackMetrics.manual_reply.currentDay > 20) {
+                this.logger.warn(
+                    `⚠️ High manual reply fallback count: ${fallbackMetrics.manual_reply.currentDay} - users may not understand button interface`
+                );
+            }
+
         } catch (error) {
-            this.logger.error('❌ Failed to track error messages', error);
+            this.logger.error('❌ Failed to track fallback messages', error);
 
             // Record failure in New Relic
-            newrelic.recordCustomEvent('DailyErrorMessageTracking', {
+            newrelic.recordCustomEvent('DailyFallbackMessageSummary', {
                 executionTime: new Date().toISOString(),
                 status: 'failed',
                 error: error.message,

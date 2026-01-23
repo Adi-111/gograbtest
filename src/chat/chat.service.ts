@@ -38,48 +38,54 @@ export class ChatService {
             const limitNum = Math.min(Math.max(1, limit), 100); // Cap at 100
             const skip = (pageNum - 1) * limitNum;
 
-            const caseExists = await this.prisma.case.findUnique({
-                where: { id: caseId },
-                include: { customer: true, user: true },
-            });
+            // Parallelize all independent queries for faster response
+            const [caseExists, totalMessages, messages, timestampRange] = await Promise.all([
+                // Fetch case with relations
+                this.prisma.case.findUnique({
+                    where: { id: caseId },
+                    include: { customer: true, user: true },
+                }),
+                // Count total messages for pagination
+                this.prisma.message.count({
+                    where: { caseId },
+                }),
+                // Fetch paginated messages (order ASC to avoid reverse later)
+                this.prisma.message.findMany({
+                    where: { caseId },
+                    include: {
+                        user: true,
+                        bot: true,
+                        WhatsAppCustomer: true,
+                        media: true,
+                        location: true,
+                        interactive: true,
+                        // Removed 'case: true' - already have case details from caseExists
+                    },
+                    orderBy: { timestamp: 'asc' }, // Changed to ASC to avoid reverse
+                    skip,
+                    take: limitNum,
+                }),
+                // Get min timestamp in a single query instead of fetching all and computing in JS
+                this.prisma.message.aggregate({
+                    where: { caseId },
+                    _min: { timestamp: true },
+                    take: 1,
+                }),
+            ]);
 
             if (!caseExists) {
                 throw new Error(`Case ${caseId} not found`);
             }
 
-            // Get total message count for pagination
-            const totalMessages = await this.prisma.message.count({
-                where: { caseId },
-            });
-
-            // Fetch paginated messages first
-            const messages = await this.prisma.message.findMany({
-                where: { caseId },
-                include: {
-                    user: true,
-                    bot: true,
-                    WhatsAppCustomer: true,
-                    media: true,
-                    location: true,
-                    interactive: true,
-                    case: true,
-                },
-                orderBy: { timestamp: 'desc' },
-                skip,
-                take: limitNum,
-            });
-
-            // Get the timestamp range from the fetched messages for filtering events
+            // Fetch events only if we have messages and a valid timestamp range
             let issueEventsRaw = [];
             let statusEvents = [];
 
-            if (messages.length > 0) {
-                const timestamps = messages.map(m => m.timestamp);
-                const minTimestamp = new Date(Math.min(...timestamps.map(t => t.getTime())));
-                // Use current time as upper bound to include events after the last message
+            if (messages.length > 0 && timestampRange._min.timestamp) {
+                const minTimestamp = timestampRange._min.timestamp;
                 const maxTimestamp = new Date();
 
-                // Fetch issue events and status events from minTimestamp onwards (including events after last message)
+                // Fetch issue events and status events in parallel
                 [issueEventsRaw, statusEvents] = await Promise.all([
                     this.prisma.issueEvent.findMany({
                         where: {
@@ -116,7 +122,7 @@ export class ChatService {
 
             return {
                 caseExists,
-                messages: messages.reverse(),
+                messages, // No need to reverse since we ordered ASC
                 issueEvents,
                 statusEvents,
                 pagination: {
