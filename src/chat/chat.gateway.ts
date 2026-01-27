@@ -720,6 +720,16 @@ export class ChatGateway
       }
 
     })
+
+
+    
+      this.server.emit('case-update', {
+        id: caseId,
+
+        updatedAt: new Date(),
+      });
+    
+
     await this.recordStatusChange(caseId, userId, kase.status, dCase.status);
 
     const updatedEvents = await this.prisma.statusEvent.findMany({
@@ -797,6 +807,7 @@ export class ChatGateway
     // ---- request-scoped tracing context
     const reqId = Math.random().toString(36).slice(2, 10);
     const startedAt = Date.now();
+    let previousStatus = null;
 
     const logCtx = (extra?: Record<string, unknown>) =>
       JSON.stringify({
@@ -822,6 +833,8 @@ export class ChatGateway
         );
         throw new Error('Case not found');
       }
+      // Store the previous status immediately after fetching to ensure accuracy
+      previousStatus = caseRecord.status;
 
       this.logger.debug(
         `Loaded case ${logCtx({
@@ -911,7 +924,13 @@ export class ChatGateway
         if (status === 'SOLVED') {
           updatedCase = await this.prisma.case.update({
             where: { id: caseId },
-            data: { status, lastBotNodeId: null, ...(assignedTo && { assignedTo }) },
+            data: {
+              status,
+              lastBotNodeId: null,
+              ...(assignedTo && { assignedTo }),
+              // Safely connect userId if provided (bot path typically has null userId)
+              ...(userId && { user: { connect: { id: userId } } })
+            },
             select: {
               id: true,
               assignedTo: true,
@@ -928,7 +947,12 @@ export class ChatGateway
         } else {
           updatedCase = await this.prisma.case.update({
             where: { id: caseId },
-            data: { status, ...(assignedTo && { assignedTo }) },
+            data: {
+              status,
+              ...(assignedTo && { assignedTo }),
+              // Safely connect userId if provided (bot path typically has null userId)
+              ...(userId && { user: { connect: { id: userId } } })
+            },
             select: {
               id: true,
               assignedTo: true,
@@ -967,14 +991,33 @@ export class ChatGateway
           })}`,
         );
 
-        await this.recordStatusChange(caseId, null, caseRecord.status, status);
-        this.logger.debug(
-          `recordStatusChange completed (bot path) ${logCtx({
-            caseId,
-            from: caseRecord.status,
-            to: status,
-          })}`,
-        );
+        if (previousStatus !== status) {
+          await this.recordStatusChange(caseId, null, previousStatus, status);
+          this.logger.debug(
+            `recordStatusChange completed (bot path) ${logCtx({
+              caseId,
+              from: previousStatus,
+              to: status,
+            })}`,
+          );
+        } else {
+          this.logger.debug(
+            `Status unchanged, skipping recordStatusChange (bot path) ${logCtx({
+              caseId,
+              status,
+            })}`,
+          );
+        }
+
+
+
+
+        this.server.emit('case-update', {
+          id: caseId,
+
+          updatedAt: new Date(),
+        });
+
 
         const updatedEvents = await this.prisma.statusEvent.findMany({
           where: { caseId },
@@ -1115,7 +1158,13 @@ export class ChatGateway
       if (status === 'SOLVED') {
         updatedCase = await this.prisma.case.update({
           where: { id: caseId },
-          data: { status, lastBotNodeId: null, ...(assignedTo && { assignedTo }) },
+          data: {
+            status,
+            lastBotNodeId: null,
+            ...(assignedTo && { assignedTo }),
+            // Safely connect userId when provided
+            ...(userId && { user: { connect: { id: userId } } })
+          },
           select: {
             id: true,
             assignedTo: true,
@@ -1132,7 +1181,12 @@ export class ChatGateway
       } else {
         updatedCase = await this.prisma.case.update({
           where: { id: caseId },
-          data: { status, ...(assignedTo && { assignedTo }) },
+          data: {
+            status,
+            ...(assignedTo && { assignedTo }),
+            // Safely connect userId when provided
+            ...(userId && { user: { connect: { id: userId } } })
+          },
           select: {
             id: true,
             assignedTo: true,
@@ -1154,14 +1208,34 @@ export class ChatGateway
         })}`,
       );
 
-      await this.recordStatusChange(caseId, userId, caseRecord.status, status);
-      this.logger.debug(
-        `recordStatusChange completed (user path) ${logCtx({
-          caseId,
-          from: caseRecord.status,
-          to: status,
-        })}`,
-      );
+      // Only record status change if status actually changed
+      if (previousStatus !== status) {
+        await this.recordStatusChange(caseId, userId, previousStatus, status);
+        this.logger.debug(
+          `recordStatusChange completed (user path) ${logCtx({
+            caseId,
+            from: previousStatus,
+            to: status,
+          })}`,
+        );
+      } else {
+        this.logger.debug(
+          `Status unchanged, skipping recordStatusChange (user path) ${logCtx({
+            caseId,
+            status,
+          })}`,
+        );
+      }
+
+
+
+
+
+      this.server.emit('case-update', {
+        id: caseId,
+        updatedAt: new Date(),
+      });
+
 
       const updatedEvents = await this.prisma.statusEvent.findMany({
         where: { caseId },

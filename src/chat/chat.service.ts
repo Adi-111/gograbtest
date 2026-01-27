@@ -418,6 +418,7 @@ export class ChatService {
                 customer_name,
                 unread: caseRecord.unread,
                 handler,
+                status: caseRecord.status
             };
         } catch (error) {
             const err = error as AxiosError<any>;
