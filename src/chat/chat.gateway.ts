@@ -722,13 +722,13 @@ export class ChatGateway
     })
 
 
-    
-      this.server.emit('case-update', {
-        id: caseId,
 
-        updatedAt: new Date(),
-      });
-    
+    this.server.emit('case-update', {
+      id: caseId,
+
+      updatedAt: new Date(),
+    });
+
 
     await this.recordStatusChange(caseId, userId, kase.status, dCase.status);
 
