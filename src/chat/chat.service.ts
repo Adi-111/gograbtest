@@ -28,6 +28,145 @@ export class ChatService {
         this.chatGateway.broadcastNewCase(room);
     }
 
+    // /**
+    //  * @deprecated Use joinCase() for messages and getCaseEvents() for events separately
+    //  * Original combined function - commented out for reference
+    //  */
+    // async joinCaseOriginal(caseId: number, page: number = 1, limit: number = 20) {
+    //     try {
+    //         if (!caseId || typeof caseId !== 'number') {
+    //             throw new Error('Invalid case ID provided');
+    //         }
+
+    //         const pageNum = Math.max(1, page);
+    //         const limitNum = Math.min(Math.max(1, limit), 100); // Cap at 100
+    //         const skip = (pageNum - 1) * limitNum;
+
+    //         const caseExists = await this.prisma.case.findUnique({
+    //             where: { id: caseId },
+    //             include: { customer: true, user: true },
+    //         });
+
+    //         if (!caseExists) {
+    //             throw new Error(`Case ${caseId} not found`);
+    //         }
+
+    //         // Get total message count for pagination
+    //         const totalMessages = await this.prisma.message.count({
+    //             where: { caseId },
+    //         });
+
+    //         // Fetch paginated messages first
+    //         const messages = await this.prisma.message.findMany({
+    //             where: { caseId },
+    //             include: {
+    //                 user: true,
+    //                 bot: true,
+    //                 WhatsAppCustomer: true,
+    //                 media: true,
+    //                 location: true,
+    //                 interactive: true,
+    //                 case: true,
+    //             },
+    //             orderBy: { timestamp: 'desc' },
+    //             skip,
+    //             take: limitNum,
+    //         });
+
+    //         // Get the timestamp range from the fetched messages for filtering events
+    //         let issueEventsRaw = [];
+    //         let statusEvents = [];
+
+    //         if (messages.length > 0) {
+    //             const timestamps = messages.map(m => m.timestamp);
+    //             const minTimestamp = new Date(Math.min(...timestamps.map(t => t.getTime())));
+    //             // Use current time as upper bound to include events after the last message
+    //             const maxTimestamp = new Date();
+
+    //             // Fetch issue events and status events from minTimestamp onwards (including events after last message)
+    //             [issueEventsRaw, statusEvents] = await Promise.all([
+    //                 this.prisma.issueEvent.findMany({
+    //                     where: {
+    //                         caseId,
+    //                         status: 'CLOSED',
+    //                         closedAt: {
+    //                             gte: minTimestamp,
+    //                             lte: maxTimestamp,
+    //                         },
+    //                     },
+    //                     orderBy: { closedAt: 'asc' },
+    //                 }),
+    //                 this.prisma.statusEvent.findMany({
+    //                     where: {
+    //                         caseId,
+    //                         timestamp: {
+    //                             gte: minTimestamp,
+    //                             lte: maxTimestamp,
+    //                         },
+    //                     },
+    //                     include: { user: true },
+    //                     orderBy: { timestamp: 'asc' },
+    //                 }),
+    //             ]);
+    //         }
+
+    //         // Map issue events to include timestamp from closedAt
+    //         const issueEvents = issueEventsRaw.map(el => ({
+    //             ...el,
+    //             timestamp: el.closedAt,
+    //         }));
+
+    //         const totalPages = Math.ceil(totalMessages / limitNum);
+
+    //         return {
+    //             caseExists,
+    //             messages: messages.reverse(),
+    //             issueEvents,
+    //             statusEvents,
+    //             pagination: {
+    //                 page: pageNum,
+    //                 limit: limitNum,
+    //                 totalMessages,
+    //                 totalPages,
+    //                 hasNextPage: pageNum < totalPages,
+    //                 hasPrevPage: pageNum > 1,
+    //             },
+    //         };
+    //     } catch (error) {
+    //         const err = error as AxiosError<any>;
+
+    //         const meta = {
+    //             caseId,
+    //             page,
+    //             limit,
+    //             env: process.env.NODE_ENV,
+    //             appVersion: process.env.APP_VERSION,
+    //         };
+
+    //         // Report detailed error to New Relic
+    //         newrelic.noticeError(err, meta);
+
+    //         // Custom event for analytics
+    //         newrelic.recordCustomEvent("ChatJoinCaseFailure", {
+    //             type: "JoinCase",
+    //             error: err?.message,
+    //             stack: err?.stack,
+    //             ...meta,
+    //         });
+
+    //         // Increment metric counter
+    //         newrelic.incrementMetric("Custom/ChatJoinCase/Failures", 1);
+
+    //         // Log server-side
+    //         this.logger.error(`Error joining case ${caseId}: ${error.message}`);
+    //         throw error;
+    //     }
+    // }
+
+    /**
+     * Join a case and retrieve paginated messages
+     * Frontend should call getCaseEvents() after successfully receiving this data
+     */
     async joinCase(caseId: number, page: number = 1, limit: number = 20) {
         try {
             if (!caseId || typeof caseId !== 'number') {
@@ -52,7 +191,7 @@ export class ChatService {
                 where: { caseId },
             });
 
-            // Fetch paginated messages first
+            // Fetch paginated messages
             const messages = await this.prisma.message.findMany({
                 where: { caseId },
                 include: {
@@ -69,56 +208,11 @@ export class ChatService {
                 take: limitNum,
             });
 
-            // Get the timestamp range from the fetched messages for filtering events
-            let issueEventsRaw = [];
-            let statusEvents = [];
-
-            if (messages.length > 0) {
-                const timestamps = messages.map(m => m.timestamp);
-                const minTimestamp = new Date(Math.min(...timestamps.map(t => t.getTime())));
-                // Use current time as upper bound to include events after the last message
-                const maxTimestamp = new Date();
-
-                // Fetch issue events and status events from minTimestamp onwards (including events after last message)
-                [issueEventsRaw, statusEvents] = await Promise.all([
-                    this.prisma.issueEvent.findMany({
-                        where: {
-                            caseId,
-                            status: 'CLOSED',
-                            closedAt: {
-                                gte: minTimestamp,
-                                lte: maxTimestamp,
-                            },
-                        },
-                        orderBy: { closedAt: 'asc' },
-                    }),
-                    this.prisma.statusEvent.findMany({
-                        where: {
-                            caseId,
-                            timestamp: {
-                                gte: minTimestamp,
-                                lte: maxTimestamp,
-                            },
-                        },
-                        include: { user: true },
-                        orderBy: { timestamp: 'asc' },
-                    }),
-                ]);
-            }
-
-            // Map issue events to include timestamp from closedAt
-            const issueEvents = issueEventsRaw.map(el => ({
-                ...el,
-                timestamp: el.closedAt,
-            }));
-
             const totalPages = Math.ceil(totalMessages / limitNum);
 
             return {
                 caseExists,
                 messages: messages.reverse(),
-                issueEvents,
-                statusEvents,
                 pagination: {
                     page: pageNum,
                     limit: limitNum,
@@ -158,6 +252,93 @@ export class ChatService {
             throw error;
         }
     }
+
+    /**
+     * Get case events (issue events and status events) for a case
+     * Call this after joinCase() to load events for the timeline/context panel
+     * @param caseId - The case ID
+     * @param since - Optional: Filter events from this timestamp onwards
+     */
+    async getCaseEvents(caseId: number, since?: Date) {
+        try {
+            if (!caseId || typeof caseId !== 'number') {
+                throw new Error('Invalid case ID provided');
+            }
+
+            // Verify case exists
+            const caseExists = await this.prisma.case.findUnique({
+                where: { id: caseId },
+            });
+
+            if (!caseExists) {
+                throw new Error(`Case ${caseId} not found`);
+            }
+
+            const whereCondition = since ? {
+                gte: since,
+                lte: new Date(),
+            } : undefined;
+
+            // Fetch issue events and status events in parallel
+            const [issueEventsRaw, statusEvents] = await Promise.all([
+                this.prisma.issueEvent.findMany({
+                    where: {
+                        caseId,
+                        status: 'CLOSED',
+                        ...(whereCondition && { closedAt: whereCondition }),
+                    },
+                    orderBy: { closedAt: 'asc' },
+                }),
+                this.prisma.statusEvent.findMany({
+                    where: {
+                        caseId,
+                        ...(whereCondition && { timestamp: whereCondition }),
+                    },
+                    include: { user: true },
+                    orderBy: { timestamp: 'asc' },
+                }),
+            ]);
+
+            // Map issue events to include timestamp from closedAt
+            const issueEvents = issueEventsRaw.map(el => ({
+                ...el,
+                timestamp: el.closedAt,
+            }));
+
+            return {
+                issueEvents,
+                statusEvents,
+            };
+        } catch (error) {
+            const err = error as AxiosError<any>;
+
+            const meta = {
+                caseId,
+                since: since?.toISOString(),
+                env: process.env.NODE_ENV,
+                appVersion: process.env.APP_VERSION,
+            };
+
+            // Report detailed error to New Relic
+            newrelic.noticeError(err, meta);
+
+            // Custom event for analytics
+            newrelic.recordCustomEvent("ChatGetCaseEventsFailure", {
+                type: "GetCaseEvents",
+                error: err?.message,
+                stack: err?.stack,
+                ...meta,
+            });
+
+            // Increment metric counter
+            newrelic.incrementMetric("Custom/ChatGetCaseEvents/Failures", 1);
+
+            // Log server-side
+            this.logger.error(`Error getting case events for case ${caseId}: ${error.message}`);
+            throw error;
+        }
+    }
+    
 
     async getChatList(
         payload?: {
