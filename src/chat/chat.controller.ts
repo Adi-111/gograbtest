@@ -43,23 +43,10 @@ export class ChatController {
         return await this.chatService.getMessagesByCaseId(id);
     }
 
-    // /**
-    //  * @deprecated Use /join/:caseId for messages and /events/:caseId for events separately
-    //  * Original combined endpoint - commented out for reference
+    //  *
+    //  * @deprecated Use joinCase() for messages and getCaseEvents() for events separately
+    //  * Original combined function  for reference
     //  */
-    // @Get('join/:caseId')
-    // async joinCaseOriginal(
-    //     @Param('caseId', ParseIntPipe) caseId: number,
-    //     @Query('page') page?: number,
-    //     @Query('limit') limit?: number,
-    // ) {
-    //     return await this.chatService.joinCase(caseId, page, limit);
-    // }
-
-    /**
-     * Join a case and retrieve paginated messages
-     * Frontend should call /events/:caseId after successfully receiving this data
-     */
     @Get('join/:caseId')
     async joinCase(
         @Param('caseId', ParseIntPipe) caseId: number,
@@ -67,6 +54,19 @@ export class ChatController {
         @Query('limit') limit?: number,
     ) {
         return await this.chatService.joinCase(caseId, page, limit);
+    }
+
+    /**
+     * Join a case and retrieve paginated messages
+     * Frontend should call /events/:caseId after successfully receiving this data
+     */
+    @Get('join/:caseId')
+    async CaseJoin(
+        @Param('caseId', ParseIntPipe) caseId: number,
+        @Query('page') page?: number,
+        @Query('limit') limit?: number,
+    ) {
+        return await this.chatService.JoinCase(caseId, page, limit);
     }
 
     /**
