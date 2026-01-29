@@ -979,7 +979,8 @@ export class CustomerService {
             })
             await this.prisma.case.update({
                 where: {
-                    id: activeCase.id
+                    id: activeCase.id,
+                    assignedTo: CaseHandler.BOT,
                 },
                 data: {
                     currentIssueId: issueEvent.id,

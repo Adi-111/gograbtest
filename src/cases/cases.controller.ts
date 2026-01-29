@@ -50,10 +50,9 @@ export class CasesController {
       where: {
         text: {
           contains: query,
-          mode: 'insensitive',
+          mode:"insensitive"
         },
       },
-      take: 10,
     });
   }
 }
