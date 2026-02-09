@@ -414,10 +414,10 @@ export class CustomerService {
         const currentTime = Math.floor(Date.now() / 1000);
         const messageTimestamp = parseInt(message.timestamp);
 
-        if (currentTime - messageTimestamp > 15) {
-            this.logger.warn(`Skipping old message. Message timestamp: ${messageTimestamp}, Current timestamp: ${currentTime}`);
-            return null;
-        }
+        // if (currentTime - messageTimestamp > 15) {
+        //     this.logger.warn(`Skipping old message. Message timestamp: ${messageTimestamp}, Current timestamp: ${currentTime}`);
+        //     return null;
+        // }
 
         // Queue the message for async processing
         try {
@@ -1441,13 +1441,34 @@ export class CustomerService {
 
     private async handleTimer(caseId: number) {
         try {
+            const now = new Date();
             // Retrieve the current timer field (if needed)
             const caseRecord = await this.prisma.case.findUnique({
                 where: { id: caseId },
-                select: { timer: true }
+                select: { timer: true, customerId: true, assignedTo: true, lastBotNodeId: true, currentIssueId: true, _count: { select: { messages: true } } }
             });
 
             if (caseRecord && caseRecord.timer) {
+
+                if (caseRecord.timer < now) {
+                    this.logger.log(`[Tracker] Case ${caseId} expired (detected in handleTimer). Logging event.`);
+                    await this.prisma.expiredEvent.create({
+                        data: {
+                            caseId: caseId,
+                            customerId: caseRecord.customerId,
+                            lastAssignedTo: caseRecord.assignedTo,
+
+                            // Timing
+                            timerSetAt: caseRecord.timer,
+                            expiredAt: now,
+
+                            // Context
+                            lastBotNodeId: caseRecord.lastBotNodeId,
+                            issueEventId: caseRecord.currentIssueId, // Nullable, so it's safe
+                            totalMessages: caseRecord._count.messages,
+                        }
+                    });
+                }
                 // Calculate 24 hours in the future
                 const newTimer = new Date(Date.now() + 24 * 60 * 60 * 1000);
 

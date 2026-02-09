@@ -1,5 +1,5 @@
-import { Tag, $Enums, Case } from "@prisma/client";
-import { JsonValue } from "@prisma/client/runtime/library";
+import { Tag, $Enums, Case, Prisma } from "@prisma/client";
+
 import { IsNumber } from "class-validator";
 
 
@@ -25,7 +25,7 @@ export class RoomEntity implements Case {
     tags: Tag[];
     notes: string;
     lastBotNodeId: string;
-    meta: JsonValue;
+    meta: Prisma.JsonValue;
     isNewCase: boolean;
     lastMessageAt: Date
 }

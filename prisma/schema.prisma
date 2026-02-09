@@ -5,7 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      =  env("DATABASE_URL")
+  
 }
 
 
@@ -182,6 +182,7 @@ model Case {
   failedMsgEvent FailedMsgEvent[]
   currentIssueId Int?
   issueEvents    IssueEvent[]
+  expiredEvents ExpiredEvent[]
 
   isNewCase Boolean @default(true)
 
@@ -247,7 +248,7 @@ model IssueEvent {
   endTimeAt     DateTime?
   agentRating Int?
 
-  messages Message[]
+  messages Message[] @relation("IssueMessages")
   case     Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   created_at DateTime @default(now())
@@ -335,7 +336,7 @@ model Message {
   caseId             Int?
   WhatsAppCustomer   WhatsAppCustomer? @relation(fields: [whatsAppCustomerId], references: [id])
   whatsAppCustomerId Int?
-  issueEvent         IssueEvent?       @relation(fields: [issueEventId], references: [id])
+  issueEvent         IssueEvent?       @relation("IssueMessages", fields: [issueEventId], references: [id])
   issueEventId       Int?
 
   firstInSummaries DailyUserMessageSummary[] @relation("SummaryFirstMessage")
@@ -562,4 +563,38 @@ model HourlyAnalytics {
   updatedAt DateTime @updatedAt
 
   @@index([datetime])
+}
+
+
+model ExpiredEvent {
+  id             Int         @id @default(autoincrement())
+  
+  // Relations
+  case           Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  caseId         Int         @unique // One expiration event per case
+  
+  
+  
+  issueEventId   Int?        
+  
+  // Snapshots
+  customerId     Int         // Denormalized for quick analytics grouping
+  lastAssignedTo CaseHandler
+  totalMessages  Int         @default(0)
+  
+  // Timing details
+  timerSetAt     DateTime    // When the countdown started
+  expiredAt      DateTime    // When the job marked it as expired
+  lastMessageAt  DateTime?   // Time of the very last message in the chat
+  
+  // Traceability
+  lastBotNodeId    String?   // Crucial: The specific step they got stuck on
+  wasAgentNotified Boolean   @default(false)
+
+  createdAt      DateTime    @default(now())
+
+  @@index([caseId])
+  @@index([issueEventId])
+  @@index([createdAt])
+  @@index([lastBotNodeId]) // Recommended: helps find "bottleneck" nodes
 }

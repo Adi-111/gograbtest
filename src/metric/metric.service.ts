@@ -759,11 +759,15 @@ export class MetricService {
     const currentFRT = await this.CalculateUserWiseFRT(currentFrom, currentTo);
     const currentMachine = await this.GetMachinePerIssues(currentFrom, currentTo);
     const currentRating = await this.GetAgentRatings(currentFrom, currentTo);
+    // [NEW] Fetch Current Expired
+    const currentExpired = await this.getExpiredChatAnalytics(currentFrom, currentTo);
 
     // ---- Fetch metrics for previous window ----
     const previousFRT = await this.CalculateUserWiseFRT(previousFrom, previousTo);
     const previousMachine = await this.GetMachinePerIssues(previousFrom, previousTo);
     const previousRating = await this.GetAgentRatings(previousFrom, previousTo);
+    // [NEW] Fetch Previous Expired
+    const previousExpired = await this.getExpiredChatAnalytics(previousFrom, previousTo);
 
 
     // ---- Metric Computations ----
@@ -801,6 +805,12 @@ export class MetricService {
     const satPrevious = previousRating.overallPercentage || 0;
     const satChange = this.safePct(satCurrent, satPrevious);
 
+    // [NEW] Expired Chats Logic
+    // We compare raw counts, but you could also calculate rate (Expired / Total Chats)
+    const expCurrent = currentExpired.totalExpired;
+    const expPrevious = previousExpired.totalExpired;
+    const expChange = this.safePct(expCurrent, expPrevious);
+
 
     return {
       chats: {
@@ -826,6 +836,13 @@ export class MetricService {
         previous: satPrevious,
         changeValue: satChange,
         isPositive: satChange >= 0,
+      },
+      expiredChats: {
+        current: expCurrent,
+        previous: expPrevious,
+        changeValue: expChange,
+        isPositive: expChange < 0, // Lower expired chats is better
+        topBottlenecks: currentExpired.bottlenecks, // Useful context for the UI
       },
     };
   }
@@ -960,6 +977,57 @@ export class MetricService {
           : "0%"
       },
       userTable: userAnalytics
+    };
+  }
+
+  /**
+   * Analyzes why chats are expiring.
+   * Returns total count, top bottlenecks (nodes where users drop off), and breakdown by issue type.
+   */
+  async getExpiredChatAnalytics(from: Date, to: Date) {
+    // 1. Fetch expired events in range
+    const expiredEvents = await this.prisma.expiredEvent.findMany({
+      where: {
+        expiredAt: { gte: from, lt: to },
+      },
+      select: {
+        id: true,
+        lastBotNodeId: true,
+      },
+    });
+
+    const totalExpired = expiredEvents.length;
+
+    if (totalExpired === 0) {
+      return {
+        totalExpired: 0,
+        bottlenecks: [],
+        byIssueType: {},
+      };
+    }
+
+    // 2. Aggregate Bottlenecks (Where did they get stuck?)
+    const nodeCounts = new Map<string, number>();
+    // 3. Aggregate by Issue Type (What were they complaining about?)
+
+
+    for (const event of expiredEvents) {
+      // Count Node drops
+      const node = event.lastBotNodeId || 'Unknown_Start';
+      nodeCounts.set(node, (nodeCounts.get(node) || 0) + 1);
+
+
+    }
+
+    // 4. Sort bottlenecks to find the worst offenders
+    const bottlenecks = Array.from(nodeCounts.entries())
+      .map(([nodeId, count]) => ({ nodeId, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Top 5 drop-off points
+
+    return {
+      totalExpired,
+      bottlenecks,
     };
   }
 

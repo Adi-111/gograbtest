@@ -1,5 +1,5 @@
-import { MessageType, ReplyType, SenderType, SystemMessageStatus } from "@prisma/client";
-import { JsonValue } from "@prisma/client/runtime/library";
+import { MessageType, ReplyType, SenderType, SystemMessageStatus, Prisma } from "@prisma/client";
+
 
 export class CreateMessageDto {
     // Required fields from Message model
@@ -29,7 +29,7 @@ export class CreateMessageDto {
 
 
     //issueEvent
-    
+
 
     // Attachments
     media?: {
@@ -54,20 +54,20 @@ export class CreateMessageDto {
 
     interactive?: {
         type: string;
-        header?: JsonValue;
-        body?: JsonValue;
-        footer?: JsonValue;
-        action: JsonValue;
-        parameters?: JsonValue;
+        header?: Prisma.JsonValue;
+        body?: Prisma.JsonValue;
+        footer?: Prisma.JsonValue;
+        action: Prisma.JsonValue;
+        parameters?: Prisma.JsonValue;
     };
 
     contacts?: Array<{
-        name?: JsonValue;
-        phones: JsonValue;
-        emails?: JsonValue;
-        addresses?: JsonValue;
-        org?: JsonValue;
+        name?: Prisma.JsonValue;
+        phones: Prisma.JsonValue;
+        emails?: Prisma.JsonValue;
+        addresses?: Prisma.JsonValue;
+        org?: Prisma.JsonValue;
         birthday?: Date;
-        urls?: JsonValue;
+        urls?: Prisma.JsonValue;
     }>;
 }
