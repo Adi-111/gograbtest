@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Request } from "@nestjs/common";
 import { CasesService } from "./cases.service";
 import { CreateCaseDto } from "./dto/create-case.dto";
 import { CaseEntity } from "./entity/case.entity";
@@ -19,6 +19,12 @@ export class CasesController {
   @ApiCreatedResponse({ type: CaseEntity })
   async create(@Body() createCaseDto: CreateCaseDto) {
     return new CaseEntity(await this.caseService.createCase(createCaseDto));
+  }
+
+  @Get('get-case-by-id/:id')
+
+  async getCaseById(@Param('id', ParseIntPipe) caseId: number, @Request() req) {
+    return await this.caseService.getCaseById(caseId, req.user?.role);
   }
 
   @Get('get-all-cases')
@@ -50,9 +56,21 @@ export class CasesController {
       where: {
         text: {
           contains: query,
-          mode:"insensitive"
+          mode: 'insensitive',
         },
       },
+
     });
+  }
+
+  @Get('get-expired-cases')
+  async getExpiredCases() {
+    return await this.caseService.getExpiredCases();
+  }
+
+  @Get('Hot-Issues/:count')
+  async getHotIssues(@Param('count', ParseIntPipe) issueCount: number) {
+    return await this.caseService.getIssuesWithMostMessages(issueCount);
+
   }
 }

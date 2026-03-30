@@ -7,6 +7,7 @@ import { CustomerService } from 'src/customer/customer.service';
 import { ChatService } from 'src/chat/chat.service';
 
 import { ProductDto } from 'src/customer/gg-backend/dto/products.dto';
+import { SenderType, Status } from '@prisma/client';
 
 // IST = UTC + 5:30 (no DST)
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -23,13 +24,31 @@ export class CronService {
 
     @Cron(CronExpression.EVERY_HOUR)
     async handleProductCron() {
-        const products: ProductDto[] = await this.cusService.getProducts();
-        await this.handleProductsUpdate(products);
+        try {
+            const products: ProductDto[] = await this.cusService.getProducts();
+            await this.handleProductsUpdate(products);
+        } catch (error) {
+            this.logger.error('❌ handleProductCron failed', error);
+            newrelic.recordCustomEvent('CronJobFailure', {
+                cronJob: 'handleProductCron',
+                error: error?.message ?? String(error),
+                executionTime: new Date().toISOString(),
+            });
+        }
     }
 
-    @Cron(CronExpression.EVERY_2ND_HOUR)
+    @Cron(CronExpression.EVERY_HOUR)
     async handleMachineCron() {
-        await this.cusService.syncMachine()
+        try {
+            await this.cusService.syncMachine();
+        } catch (error) {
+            this.logger.error('❌ handleMachineCron failed', error);
+            newrelic.recordCustomEvent('CronJobFailure', {
+                cronJob: 'handleMachineCron',
+                error: error?.message ?? String(error),
+                executionTime: new Date().toISOString(),
+            });
+        }
     }
 
     // @Cron(CronExpression.EVERY_10_SECONDS)
@@ -78,65 +97,73 @@ export class CronService {
 
     @Cron(CronExpression.EVERY_HOUR)
     async handleDailyUserSummaries() {
-
-        const { startUtc, endUtc, dateKeyUtc, startIST, endIST } = this.getIST4amWindow();
-
-        this.logger.log(
-            `⏳ DailyUserMessageSummary window IST: ${startIST.toISOString()} → ${endIST.toISOString()} | UTC: ${startUtc.toISOString()} → ${endUtc.toISOString()}`
-        );
-
-        const users = [{ id: 3 }, { id: 6 }, { id: 8 }, { id: 1 }];
-
-        for (const { id: userId } of users) {
-            const messages = await this.prisma.message.findMany({
-                where: {
-                    userId,
-                    timestamp: { gte: startUtc, lte: endUtc }, // 4AM IST → 4AM IST window (in UTC)
-                },
-                orderBy: { timestamp: 'asc' },
-                select: { id: true, text: true, timestamp: true },
-            });
-
-            if (!messages.length) continue;
-
-            const firstMessage = messages[0];
-            const lastMessage = messages[messages.length - 1];
-
-            const activeDuration =
-                Math.round((lastMessage.timestamp.getTime() - firstMessage.timestamp.getTime()) / 60000);
-
-            const dump = await this.prisma.dailyUserMessageSummary.upsert({
-                where: { userId_date: { userId, date: dateKeyUtc } }, // unique on (userId, date)
-                update: {
-                    firstMessageId: firstMessage.id,
-                    lastMessageId: lastMessage.id,
-                    firstTimestamp: firstMessage.timestamp,
-                    lastTimestamp: lastMessage.timestamp,
-                    totalMessages: messages.length,
-                    activeDuration,
-                    firstText: firstMessage.text?.slice(0, 250) ?? null,
-                    lastText: lastMessage.text?.slice(0, 250) ?? null,
-                },
-                create: {
-                    userId,
-                    date: dateKeyUtc, // the 4AM-IST anchor in UTC
-                    firstMessageId: firstMessage.id,
-                    lastMessageId: lastMessage.id,
-                    firstTimestamp: firstMessage.timestamp,
-                    lastTimestamp: lastMessage.timestamp,
-                    totalMessages: messages.length,
-                    activeDuration,
-                    firstText: firstMessage.text?.slice(0, 250) ?? null,
-                    lastText: lastMessage.text?.slice(0, 250) ?? null,
-                },
-            });
+        try {
+            const { startUtc, endUtc, dateKeyUtc, startIST, endIST } = this.getIST4amWindow();
 
             this.logger.log(
-                `✅ userId=${userId} summarized for business day starting (IST) ${startIST.toDateString()} | upsertId=${dump?.id ?? '—'}`
+                `⏳ DailyUserMessageSummary window IST: ${startIST.toISOString()} → ${endIST.toISOString()} | UTC: ${startUtc.toISOString()} → ${endUtc.toISOString()}`
             );
-        }
 
-        this.logger.log(`✅ DailyUserMessageSummary complete for business day starting (IST) ${startIST.toDateString()}`);
+            const users = [{ id: 3 }, { id: 6 }, { id: 8 }, { id: 1 }];
+
+            for (const { id: userId } of users) {
+                const messages = await this.prisma.message.findMany({
+                    where: {
+                        userId,
+                        timestamp: { gte: startUtc, lte: endUtc }, // 4AM IST → 4AM IST window (in UTC)
+                    },
+                    orderBy: { timestamp: 'asc' },
+                    select: { id: true, text: true, timestamp: true },
+                });
+
+                if (!messages.length) continue;
+
+                const firstMessage = messages[0];
+                const lastMessage = messages[messages.length - 1];
+
+                const activeDuration =
+                    Math.round((lastMessage.timestamp.getTime() - firstMessage.timestamp.getTime()) / 60000);
+
+                const dump = await this.prisma.dailyUserMessageSummary.upsert({
+                    where: { userId_date: { userId, date: dateKeyUtc } }, // unique on (userId, date)
+                    update: {
+                        firstMessageId: firstMessage.id,
+                        lastMessageId: lastMessage.id,
+                        firstTimestamp: firstMessage.timestamp,
+                        lastTimestamp: lastMessage.timestamp,
+                        totalMessages: messages.length,
+                        activeDuration,
+                        firstText: firstMessage.text?.slice(0, 250) ?? null,
+                        lastText: lastMessage.text?.slice(0, 250) ?? null,
+                    },
+                    create: {
+                        userId,
+                        date: dateKeyUtc, // the 4AM-IST anchor in UTC
+                        firstMessageId: firstMessage.id,
+                        lastMessageId: lastMessage.id,
+                        firstTimestamp: firstMessage.timestamp,
+                        lastTimestamp: lastMessage.timestamp,
+                        totalMessages: messages.length,
+                        activeDuration,
+                        firstText: firstMessage.text?.slice(0, 250) ?? null,
+                        lastText: lastMessage.text?.slice(0, 250) ?? null,
+                    },
+                });
+
+                this.logger.log(
+                    `✅ userId=${userId} summarized for business day starting (IST) ${startIST.toDateString()} | upsertId=${dump?.id ?? '—'}`
+                );
+            }
+
+            this.logger.log(`✅ DailyUserMessageSummary complete for business day starting (IST) ${startIST.toDateString()}`);
+        } catch (error) {
+            this.logger.error('❌ handleDailyUserSummaries failed', error);
+            newrelic.recordCustomEvent('CronJobFailure', {
+                cronJob: 'handleDailyUserSummaries',
+                error: error?.message ?? String(error),
+                executionTime: new Date().toISOString(),
+            });
+        }
     }
 
 
@@ -348,6 +375,124 @@ export class CronService {
                 status: 'failed',
                 error: error.message,
             });
+        }
+    }
+    IndianDayWindow() {
+        // 1) Current time in UTC
+        const nowUtc = new Date();
+
+        // 2) Convert to IST "view" of now
+        const nowIst = new Date(nowUtc.getTime() + IST_OFFSET_MS);
+
+        // 3) Build a Date representing today’s 00:00:00.000 in IST
+        const midnightIstLocal = new Date(Date.UTC(
+            nowIst.getUTCFullYear(),
+            nowIst.getUTCMonth(),
+            nowIst.getUTCDate(),
+            0, 0, 0, 0,
+        ));
+
+        // 4) Convert that IST midnight back to UTC for DB queries
+        const startIST = new Date(midnightIstLocal.getTime() - IST_OFFSET_MS);
+        const endIST = new Date(startIST.getTime() + 24 * 60 * 60 * 1000);
+
+        return { startIST, endIST };
+    }
+
+    /**
+     * Daily cron job to track expired chats
+     * Runs every 10 minutes and tracks expired chats for the current business day (4AM IST → 4AM IST)
+     */
+    @Cron(CronExpression.EVERY_10_MINUTES)
+    async handleExpiredChats() {
+        try {
+            const now = new Date();
+
+            // Use IST day window (00:00–23:59:59.999 IST mapped to UTC)
+            const { startIST, endIST } = this.IndianDayWindow();
+
+            const expiredChats = await this.prisma.case.findMany({
+                where: {
+                    timer: { lt: now },
+                    status: {
+                        notIn: [Status.SOLVED]
+                    },
+                },
+                select: {
+                    id: true,
+                    customerId: true,
+                    messages: {
+                        where: {
+                            senderType: SenderType.CUSTOMER
+                        },
+                        orderBy: {
+                            timestamp: 'desc'
+                        },
+                        take: 1,
+                        select: {
+                            timestamp: true,
+                            id: true,
+                            text: true,
+                        }
+                    },
+                    timer: true,
+                    lastBotNodeId: true,
+                    currentIssueId: true,
+                    assignedTo: true,
+
+                },
+            });
+
+            if (!expiredChats.length) {
+                this.logger.debug('handleExpiredChats: no expired chats found for current window');
+                return;
+            }
+
+            let createdCount = 0;
+
+            for (const caseRecord of expiredChats) {
+                // Has this case already produced an ExpiredEvent in the current IST business day?
+                const alreadyExists = await this.prisma.expiredEvent.findFirst({
+                    where: {
+                        caseId: caseRecord.id,
+                        createdAt: {
+                            gte: startIST,
+                            lt: endIST,
+                        },
+                    },
+                    select: { id: true },
+                });
+
+                if (alreadyExists) {
+                    continue; // skip; we already logged this case for this day
+                }
+
+
+
+                await this.prisma.expiredEvent.create({
+                    data: {
+                        caseId: caseRecord.id,
+                        customerId: caseRecord.customerId,
+                        lastAssignedTo: caseRecord.assignedTo,
+                        timerSetAt: caseRecord.timer,
+                        expiredAt: caseRecord.timer,
+                        lastBotNodeId: caseRecord.lastBotNodeId,
+                        issueEventId: caseRecord.currentIssueId,
+                        lastMessageAt: caseRecord.messages[0].timestamp,
+                    },
+                });
+
+                createdCount++;
+            }
+
+            this.logger.log(
+                `handleExpiredChats: created ${createdCount} expired events out of ${expiredChats.length} candidates for IST window ${startIST.toISOString()} → ${endIST.toISOString()}`,
+            );
+        } catch (error: any) {
+            this.logger.error(
+                `handleExpiredChats failed: ${error?.message ?? error}`,
+                error?.stack,
+            );
         }
     }
 

@@ -450,7 +450,7 @@ export class BotService {
     ) {
         const { vendItems, productItems } = detail
         let allVendsSuccessful = true;
-
+        let anyPending = false;
 
         // Header
         let msg =
@@ -485,8 +485,12 @@ export class BotService {
 
                 // decide icon & text
                 const success = vend.vend_status.toLowerCase() === "dispense_successful"
+                const pending = vend.vend_status.toLowerCase() === "pending"
                 if (!success) {
                     allVendsSuccessful = false;
+                }
+                if (pending) {
+                    anyPending = true;
                 }
                 const icon = success ? "✅" : "❌"
                 const statusText = success ? "Successful" : "Failed"
@@ -500,7 +504,10 @@ export class BotService {
             msg +=
                 `\nSince the products are marked as 'Successful' in our logs, a refund has not been automatically processed.\n\n` +
                 `If you experienced any issues or didn't receive your items, please reply to this message and let us know! We're here to help.\n\n`;
-        } else {
+        } else if (anyPending) {
+            msg = `\nRefund hasn't been processed yet for this one. Please wait a bit—our team will check and get back to you shortly.\n\n`
+        }
+        else {
             // This handles cases where there's at least one failed dispense, or a mix.
             msg += `\nRefund hasn't been processed yet for this one. Please wait a bit—our team will check and get back to you shortly.\n\n`;  // Added a "Thank you!" for consistency, feel free to adjust.
         }

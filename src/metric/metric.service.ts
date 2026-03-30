@@ -91,83 +91,79 @@ export class MetricService {
   }
 
 
-  async GetAgentRatings(from: Date, to: Date) {
-    // Step 1: Fetch rating rows
-    const rows = await this.prisma.issueEvent.findMany({
-      where: {
-        agentRating: { not: null },
-        created_at: { gte: from, lte: to },
-        userId: { not: null }
-      },
-      select: {
-        userId: true,
-        agentRating: true
-      }
-    });
 
-    if (rows.length === 0) {
-      return {
-        agents: [],
-        overallAvg: 0,
-        overallPercentage: 0
-      };
+
+  async GetAgentRatings(from: Date, to: Date) {
+    const agentIds = [3, 6, 8];
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: agentIds } },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+    const userLookup = new Map(users.map((u) => [u.id, u]));
+
+    // totalCases: case-level, deduplicated, scoped by case.createdAt
+    const allCases = await this.prisma.case.findMany({
+      where: {
+        userId: { in: agentIds },
+        createdAt: { gte: from, lte: to },
+      },
+      select: { id: true, userId: true },
+    });
+    const totalCasesPerUser = new Map<number, number>();
+    for (const c of allCases) {
+      totalCasesPerUser.set(c.userId!, (totalCasesPerUser.get(c.userId!) ?? 0) + 1);
     }
 
-    // Step 2: Agent-wise aggregation + global aggregation
-    const map = new Map<number, { ratingSum: number; total: number }>();
+    // Ratings: issue-level (no case deduplication), scoped by issueEvent.closedAt
+    const ratedIssues = await this.prisma.issueEvent.findMany({
+      where: {
+        status: IssueEventStatus.CLOSED,
+        agentRating: { not: null },
+        userId: { in: agentIds },
+        closedAt: { gte: from, lte: to },
+      },
+      select: { userId: true, agentRating: true },
+    });
+
+    type UserAgg = { totalCases: number; ratingSum: number; totalRatings: number };
+    const perUser = new Map<number, UserAgg>();
+    const initAgg = (): UserAgg => ({ totalCases: 0, ratingSum: 0, totalRatings: 0 });
+
+    for (const [userId, count] of totalCasesPerUser) {
+      if (!perUser.has(userId)) perUser.set(userId, initAgg());
+      perUser.get(userId)!.totalCases = count;
+    }
 
     let globalSum = 0;
-    let globalCount = 0;
-
-    for (const r of rows) {
-      const uid = r.userId!;
-      globalSum += r.agentRating ?? 0;
-      globalCount += 1;
-
-      if (!map.has(uid)) {
-        map.set(uid, { ratingSum: 0, total: 0 });
-      }
-
-      const agg = map.get(uid)!;
-      agg.ratingSum += r.agentRating ?? 0;
-      agg.total += 1;
+    for (const issue of ratedIssues) {
+      const uid = issue.userId!;
+      const rating = issue.agentRating!;
+      globalSum += rating;
+      if (!perUser.has(uid)) perUser.set(uid, initAgg());
+      const agg = perUser.get(uid)!;
+      agg.ratingSum += rating;
+      agg.totalRatings += 1;
     }
 
-    // Step 3: Bulk fetch users
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: Array.from(map.keys()) } },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true
-      }
-    });
+    const globalCount = ratedIssues.length;
 
-    const userLookup = new Map(users.map(u => [u.id, u]));
-
-    // Step 4: Build agent-wise result
-    const agents = Array.from(map.entries()).map(([uid, stats]) => {
+    const agents = Array.from(perUser.entries()).map(([uid, agg]) => {
       const user = userLookup.get(uid);
-      const maxRating = stats.total * 5;
-
+      const maxRating = agg.totalRatings * 5;
       return {
         user,
-        totalRatings: stats.total,
-        avgRating: stats.ratingSum / stats.total,
-        percentage: maxRating ? (stats.ratingSum / maxRating) * 100 : 0
+        totalCases: agg.totalCases,
+        totalRatings: agg.totalRatings,
+        avgRating: agg.totalRatings > 0 ? agg.ratingSum / agg.totalRatings : 0,
+        percentage: maxRating ? (agg.ratingSum / maxRating) * 100 : 0,
       };
     });
 
-    // Step 5: Compute overall
-    const overallAvg = globalSum / globalCount;            // e.g., 4.2 out of 5
-    const overallPercentage = (overallAvg / 5) * 100;      // convert to %
+    const overallAvg = globalCount > 0 ? globalSum / globalCount : 0;
+    const overallPercentage = (overallAvg / 5) * 100;
 
-    return {
-      agents,
-      overallAvg,
-      overallPercentage
-    };
+    return { agents, overallAvg, overallPercentage };
   }
 
 
@@ -247,115 +243,84 @@ export class MetricService {
   }
 
   async CalculateUserWiseFRT(from: Date, to: Date) {
-    const users = await this.prisma.user.findMany({
-      where: {
-        id: {
-          in: [3, 6, 8]
+    const agentIds = [3, 6, 8];
+
+    // Step 1: Parallel Fetch with optimized selection
+    const [users, allIssues] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: agentIds } },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+      this.prisma.issueEvent.findMany({
+        where: {
+          userId: { in: agentIds },
+          status: IssueEventStatus.CLOSED,
+          closedAt: { gte: from, lte: to },
+        },
+        include: { // Using include to get messages in one query if relations allow, 
+          // but keeping your structure for clarity
+          messages: { orderBy: { timestamp: 'asc' }, select: { senderType: true, timestamp: true } }
         }
-      },
-      select: { id: true, firstName: true, lastName: true },
-    });
+      }),
+    ]);
 
-    const result: any[] = [];
-
+    // Step 2: Initialize Accumulator Object - O(Agents)
+    const stats = new Map();
     for (const user of users) {
-      // Step 1: Find all cases assigned to the user within the date range
-      const cases = await this.prisma.case.findMany({
-        where: {
-          userId: user.id,
-          createdAt: { gte: from, lte: to },
-        },
-        select: { id: true },
-      });
-
-      const caseIds = cases.map(c => c.id);
-      const totalChats = cases.length;
-
-      // Step 2: Fetch all messages in those cases
-      const messages = await this.prisma.message.findMany({
-        where: {
-          caseId: { in: caseIds },
-          timestamp: { gte: from, lte: to },
-        },
-        orderBy: { timestamp: "asc" },
-        select: {
-          id: true,
-          senderType: true,
-          timestamp: true,
-        },
-      });
-
-      // Count messages sent by the agent (USER type)
-      const totalMessages = messages.filter(m => m.senderType === SenderType.USER).length;
-
-      // Step 3: Fetch refund data from IssueEvent
-      const issueEvents = await this.prisma.issueEvent.findMany({
-        where: {
-          userId: user.id,
-          issueType: 'REFUND',
-          openedAt: { gte: from, lte: to },
-        },
-        select: {
-          refundMode: true,
-          refundAmountMinor: true,
-        },
-      });
-
-      const manualRefunds = issueEvents.filter(e => e.refundMode === 'MANUAL').length;
-      const autoRefunds = issueEvents.filter(e => e.refundMode === 'AUTO').length;
-      const manualRefundAmount = issueEvents
-        .filter(e => e.refundMode === 'MANUAL')
-        .reduce((sum, e) => sum + (e.refundAmountMinor || 0), 0);
-
-      if (caseIds.length === 0) {
-        result.push({
-          userId: user.id,
-          userName: `${user.firstName} ${user.lastName}`,
-          totalChats: 0,
-          totalMessages: 0,
-          manualRefunds,
-          manualRefundAmount,
-          autoRefunds,
-          avgFRTMinutes: null,
-          frtList: [],
-        });
-        continue;
-      }
-
-      // Step 4: Calculate FRT
-      let lastBotMsg: Date | null = null;
-      const frtList: number[] = [];
-
-      for (const msg of messages) {
-        if (msg.senderType === SenderType.BOT) {
-          lastBotMsg = msg.timestamp;
-        }
-
-        if (msg.senderType === SenderType.USER && lastBotMsg) {
-          const frtMs = msg.timestamp.getTime() - lastBotMsg.getTime();
-          const frtMinutes = frtMs / 1000 / 60;
-
-          frtList.push(frtMinutes);
-          lastBotMsg = null; // Reset
-        }
-      }
-
-      result.push({
+      stats.set(user.id, {
         userId: user.id,
         userName: `${user.firstName} ${user.lastName}`,
-        totalChats,
-        totalMessages,
-        manualRefunds,
-        manualRefundAmount,
-        autoRefunds,
-        avgFRTMinutes: frtList.length
-          ? Number((frtList.reduce((a, b) => a + b, 0) / frtList.length).toFixed(2))
-          : null,
-        frtList,
+        caseIds: new Set<number>(),
+        manualRefundCases: new Set<number>(),
+        autoRefundCases: new Set<number>(),
+        manualRefundAmount: 0,
+        frtList: [] as number[],
       });
     }
 
-    return result;
+    // Step 3: Single Pass Distribution - O(n) where n = allIssues
+    for (const issue of allIssues) {
+      const userStats = stats.get(issue.userId);
+      if (!userStats) continue;
+
+      if (issue.caseId) userStats.caseIds.add(issue.caseId);
+
+      // Refund Aggregation
+      if (issue.issueType === IssueType.REFUND) {
+        if (issue.refundMode === RefundMode.MANUAL) {
+          if (issue.caseId) userStats.manualRefundCases.add(issue.caseId);
+          userStats.manualRefundAmount += (issue.refundAmountMinor || 0);
+        } else if (issue.refundMode === RefundMode.AUTO && issue.caseId) {
+          userStats.autoRefundCases.add(issue.caseId);
+        }
+      }
+
+      // FRT Calculation Logic - O(m) where m = messages per issue
+      let lastCustomerMsg: number | null = null;
+      for (const msg of issue.messages) {
+        if (msg.senderType === SenderType.CUSTOMER) {
+          lastCustomerMsg = msg.timestamp.getTime();
+        } else if (msg.senderType === SenderType.USER && lastCustomerMsg) {
+          const diffMinutes = (msg.timestamp.getTime() - lastCustomerMsg) / 60000;
+          if (diffMinutes >= 0) userStats.frtList.push(diffMinutes);
+          lastCustomerMsg = null; // Reset to find the NEXT response pair
+        }
+      }
+    }
+
+    // Step 4: Final Formatting - O(Agents)
+    return Array.from(stats.values()).map(s => ({
+      userId: s.userId,
+      userName: s.userName,
+      totalChats: s.caseIds.size,
+      manualRefunds: s.manualRefundCases.size,
+      manualRefundAmount: s.manualRefundAmount,
+      autoRefunds: s.autoRefundCases.size,
+      avgFRTMinutes: s.frtList.length
+        ? Number((s.frtList.reduce((a, b) => a + b, 0) / s.frtList.length).toFixed(2))
+        : null,
+      frtList: s.frtList
+    }));
   }
 
 
@@ -366,20 +331,18 @@ export class MetricService {
     toIST: Date;
     mode?: "opened" | "updated";
   }) {
-
-    const { fromIST, toIST, mode = "opened" } = params;
+    const { fromIST, toIST } = params;
 
     this.logger.log(`Running agentIssueClosureAnalytics with`, params);
 
-
-
-
-    // 2️⃣ Fetch all closed issues with userId
-    const issues = await this.getIssuesInRange({
-      fromIST,
-      toIST,
-      mode,
-      includeClosedOnly: true, // only closed issues
+    // Issue stats: scoped by closedAt (issue-level, no case dedup) — same ruleset
+    const issues = await this.prisma.issueEvent.findMany({
+      where: {
+        status: IssueEventStatus.CLOSED,
+        userId: { not: null },
+        closedAt: { gte: fromIST, lte: toIST },
+      },
+      select: { id: true, userId: true, openedAt: true, closedAt: true },
     });
 
     if (!issues.length) {
@@ -387,51 +350,53 @@ export class MetricService {
       return { total: 0, summary: [] };
     }
 
-    // 3️⃣ Compute durations
-    const enriched = issues.map((i) => {
-      const durationMs =
-        new Date(i.closedAt!).getTime() - new Date(i.openedAt).getTime();
-      const durationHrs = durationMs / (1000 * 60 * 60);
-      return {
-        ...i,
-        durationHrs,
-        slow: durationHrs > 4,
-      };
-    });
-
-    // 4️⃣ Fetch all users in one query
     const uniqueUserIds = Array.from(
-      new Set(enriched.map((i) => i.userId).filter(Boolean))
-    );
-    const users = await this.prisma.user.findMany({
-      where: { id: { in: uniqueUserIds } },
-      select: { id: true, firstName: true, lastName: true, email: true },
-    });
+      new Set(issues.map((i) => i.userId).filter(Boolean))
+    ) as number[];
+
+    // Fetch user names and totalCases in parallel
+    const [users, allCases] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: uniqueUserIds } },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      }),
+      // totalCases: case-level, deduplicated, scoped by case.createdAt
+      this.prisma.case.findMany({
+        where: {
+          userId: { in: uniqueUserIds },
+          createdAt: { gte: fromIST, lte: toIST },
+        },
+        select: { id: true, userId: true },
+      }),
+    ]);
+
     const userMap = new Map(
       users.map((u) => [
         u.id,
         `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || "Unknown",
       ])
     );
+    const totalCasesPerUser = new Map<number, number>();
+    for (const c of allCases) {
+      totalCasesPerUser.set(c.userId!, (totalCasesPerUser.get(c.userId!) ?? 0) + 1);
+    }
 
-    // 5️⃣ Group issues by user
-    const grouped = new Map<
-      number,
-      {
-        agentName: string;
-        totalClosed: number;
-        closedAfter4Hrs: number;
-        totalDurationHrs: number;
-      }
-    >();
+    // Group issues by user and compute durations (issue-level, closedAt scope)
+    const grouped = new Map<number, {
+      agentName: string;
+      totalClosed: number;
+      closedAfter4Hrs: number;
+      totalDurationHrs: number;
+    }>();
 
-    for (const issue of enriched) {
-      const uid = issue.userId ?? 0;
-      const agentName = userMap.get(uid) || "Unassigned";
+    for (const issue of issues) {
+      const uid = issue.userId!;
+      const durationMs = new Date(issue.closedAt!).getTime() - new Date(issue.openedAt).getTime();
+      const durationHrs = durationMs / (1000 * 60 * 60);
 
       if (!grouped.has(uid)) {
         grouped.set(uid, {
-          agentName,
+          agentName: userMap.get(uid) || "Unassigned",
           totalClosed: 0,
           closedAfter4Hrs: 0,
           totalDurationHrs: 0,
@@ -440,17 +405,17 @@ export class MetricService {
 
       const entry = grouped.get(uid)!;
       entry.totalClosed += 1;
-      entry.totalDurationHrs += issue.durationHrs;
-      if (issue.slow) entry.closedAfter4Hrs += 1;
+      entry.totalDurationHrs += durationHrs;
+      if (durationHrs > 4) entry.closedAfter4Hrs += 1;
     }
 
-    // 6️⃣ Compute aggregates
     const summary = Array.from(grouped.entries()).map(([userId, g]) => {
       const avg = g.totalClosed ? g.totalDurationHrs / g.totalClosed : 0;
       const slowRate = g.totalClosed ? (g.closedAfter4Hrs / g.totalClosed) * 100 : 0;
       return {
         userId,
         agentName: g.agentName,
+        totalCases: totalCasesPerUser.get(userId) ?? 0,
         totalClosed: g.totalClosed,
         closedAfter4Hrs: g.closedAfter4Hrs,
         avgClosureTimeHrs: Number(avg.toFixed(2)),
@@ -460,9 +425,7 @@ export class MetricService {
 
     summary.sort((a, b) => b.slowRate - a.slowRate);
 
-    this.logger.log(
-      `✅ Agent closure analytics generated: ${summary.length} agents`
-    );
+    this.logger.log(`✅ Agent closure analytics generated: ${summary.length} agents`);
 
     return { total: issues.length, summary };
   }
@@ -474,65 +437,74 @@ export class MetricService {
   async getManualRefundTrendPerAgent(params: {
     fromIST: Date;
     toIST: Date;
-    mode?: 'opened' | 'updated';
   }) {
-    const { fromIST, toIST, mode = 'opened' } = params;
+    const { fromIST, toIST } = params;
+    const agentIds = [3, 6, 8];
 
-    // 1️⃣ Time filter (like other metrics)
-    const timeFilter =
-      mode === 'updated'
-        ? { updatedAt: { gte: fromIST, lt: toIST } }
-        : { openedAt: { gte: fromIST, lt: toIST } };
-
-    // 2️⃣ Fetch manual refund issues with relevant data
-    const allIssues = await this.getIssuesInRange({
-      fromIST,
-      toIST,
-      mode,
-      includeClosedOnly: true,
+    // Same ruleset: CLOSED issues, closedAt scope, restricted to known agentIds
+    const issues = await this.prisma.issueEvent.findMany({
+      where: {
+        userId: { in: agentIds },
+        status: IssueEventStatus.CLOSED,
+        issueType: IssueType.REFUND,
+        refundMode: RefundMode.MANUAL,
+        closedAt: { gte: fromIST, lte: toIST },
+      },
+      select: {
+        userId: true,
+        caseId: true,
+        closedAt: true,
+        refundAmountMinor: true,
+      },
     });
 
-    // 2️⃣ Filter manually refunded refund issues
-    const issues = allIssues.filter(
-      (i) =>
-        i.issueType === 'REFUND' &&
-        i.refundMode === 'MANUAL' &&
-        i.userId !== null
-    );
-
-    // 3️⃣ Group by date + agent with aggregated info
-    const grouped: Record<string, Record<number, { count: number; amount: number }>> = {};
+    // Step 1: Aggregate per unique case — earliest closedAt date + summed amount.
+    // This ensures each case is counted exactly once globally, matching CalculateUserWiseFRT.
+    const caseAgg = new Map<number, { date: string; userId: number; amount: number }>();
 
     for (const issue of issues) {
+      if (!issue.caseId) continue;
       const dateKey = format(new Date(issue.closedAt!), 'yyyy-MM-dd');
-      const uid = issue.userId!;
-      if (!grouped[dateKey]) grouped[dateKey] = {};
-      if (!grouped[dateKey][uid]) grouped[dateKey][uid] = { count: 0, amount: 0 };
-      grouped[dateKey][uid].count += 1;
-      grouped[dateKey][uid].amount += issue.refundAmountMinor ?? 0;
+      const existing = caseAgg.get(issue.caseId);
+      if (!existing) {
+        caseAgg.set(issue.caseId, { date: dateKey, userId: issue.userId!, amount: issue.refundAmountMinor ?? 0 });
+      } else {
+        if (dateKey < existing.date) existing.date = dateKey; // pin to earliest date
+        existing.amount += issue.refundAmountMinor ?? 0;
+      }
+    }
+
+    // Step 2: Group unique cases into date + agent buckets
+    const grouped: Record<string, Record<number, { count: number; amount: number }>> = {};
+
+    for (const { date, userId, amount } of caseAgg.values()) {
+      if (!grouped[date]) grouped[date] = {};
+      if (!grouped[date][userId]) grouped[date][userId] = { count: 0, amount: 0 };
+      grouped[date][userId].count += 1;
+      grouped[date][userId].amount += amount;
     }
 
     const dates = Object.keys(grouped).sort();
-    const agentIds = Array.from(
+    const presentAgentIds = Array.from(
       new Set(dates.flatMap((d) => Object.keys(grouped[d]).map(Number))),
     );
 
-    // 4️⃣ Build dataset with hover info (custom object per point)
-    const datasets = agentIds.map((agentId) => {
-      const label =
-        issues.find((i) => i.userId === agentId)?.userId ||
-        `Agent#${agentId}`;
+    // Build dataset with hover info
+    const datasets = presentAgentIds.map((agentId) => {
+      const label = issues.find((i) => i.userId === agentId)?.userId || `Agent#${agentId}`;
 
       return {
         label,
         data: dates.map((d) => {
           const val = grouped[d][agentId];
+          const count = val ? val.count : 0;
+          const amount = val ? val.amount : 0;
           return {
             x: d,
-            y: val ? val.count : 0,
-            refundAmount: val ? val.amount : 0,
+            y: count,
+            refundAmount: amount,
             tooltip: val
-              ? `Refunds: ${val.count} | Amount: ₹${(val.amount).toFixed(2)}`
+              ? `Refunds: ${count} | Amount: ₹${amount.toFixed(2)}`
               : 'No data',
           };
         }),
@@ -860,130 +832,133 @@ export class MetricService {
    *   - userTable: Per-agent breakdown with case analytics
    */
   async NotSendUnratedMessageIssues(from: Date, to: Date) {
-    const users = await this.prisma.user.findMany({
-      where: {
-        id: {
-          in: [3, 6, 8]
-        }
-      },
-      select: { id: true, firstName: true, lastName: true },
+    const agentIds = [3, 6, 8];
+
+    // Step 1: Fetch users and closed issues in parallel
+    // totalCases derived from unique caseIds in closed issues — no separate case query needed.
+    const [users, closedIssues] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: agentIds } },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+      this.prisma.issueEvent.findMany({
+        where: {
+          userId: { in: agentIds },
+          status: IssueEventStatus.CLOSED,
+          closedAt: { gte: from, lte: to },
+        },
+        select: { id: true, userId: true, caseId: true, agentRating: true },
+      }),
+    ]);
+
+    const closedIssueIds = closedIssues.map(i => i.id);
+
+    // Build issueId → userId lookup for message aggregation
+    const issueUserMap = new Map(closedIssues.map(i => [i.id, i.userId]));
+
+    // Step 2: Fetch all messages for those issues — used for both rating detection and unique case counting.
+    const issueMessages = await this.prisma.message.findMany({
+      where: { issueEventId: { in: closedIssueIds } },
+      select: { issueEventId: true, caseId: true, type: true, text: true },
     });
 
-    const userAnalytics: any[] = [];
-    let totalCases = 0;
-    let totalWithRating = 0;
-    let totalWithMessage = 0;
-    let totalRatingButNoMsg = 0;
+    // Unique caseIds per user derived from messages linked to their issues
+    const casesPerUser = new Map<number, Set<number>>();
+    const issueIdsWithMessage = new Set<number>();
 
-    for (const user of users) {
-      // Step 1: Get all cases for this user created in the date range
-      const cases = await this.prisma.case.findMany({
-        where: {
-          userId: user.id,
-          createdAt: { gte: from, lte: to },
-        },
-        select: {
-          id: true,
-          issueEvents: {
-            where: {
-              status: IssueEventStatus.CLOSED,
-            },
-            select: {
-              id: true,
-              agentRating: true,
-              closedAt: true,
-            }
-          }
-        }
-      });
+    for (const msg of issueMessages) {
+      if (!msg.issueEventId) continue;
+      const userId = issueUserMap.get(msg.issueEventId);
 
-      const caseIds = cases.map(c => c.id);
-
-      if (caseIds.length === 0) {
-        userAnalytics.push({
-          agent: `${user.firstName} ${user.lastName}`,
-          totalCases: 0,
-          withRating: 0,
-          messageSent: 0,
-          ratingButNoMsg: 0,
-          msgRate: "0%"
-        });
-        continue;
+      // Count unique cases via message caseId
+      if (userId && msg.caseId) {
+        if (!casesPerUser.has(userId)) casesPerUser.set(userId, new Set());
+        casesPerUser.get(userId)!.add(msg.caseId);
       }
 
-      // Step 2: Find rating messages for these cases
-      const ratingMessages = await this.prisma.message.findMany({
-        where: {
-          type: MessageType.INTERACTIVE,
-          text: { contains: 'How would you rate your experience' },
-          timestamp: { gte: from, lte: to },
-          caseId: { in: caseIds, not: null }
-        },
-        select: {
-          id: true,
-          caseId: true,
-        }
-      });
-
-      // Step 3: Extract unique case IDs that have rating messages
-      const caseIdsWithMessage = new Set(
-        ratingMessages.map(msg => msg.caseId).filter(id => id !== null) as number[]
-      );
-
-      // Step 4: Calculate user-specific metrics
-      const userCases = cases;
-
-      // Cases where at least one issue has a rating
-      const userCasesWithRating = userCases.filter(c =>
-        c.issueEvents.some(issue => issue.agentRating !== null)
-      );
-
-      // Cases that have rating messages
-      const userCasesWithMessage = userCases.filter(c => caseIdsWithMessage.has(c.id));
-
-      // Cases with ratings but no message sent
-      const userCasesWithRatingButNoMessage = userCasesWithRating.filter(
-        c => !caseIdsWithMessage.has(c.id)
-      );
-
-      // Update overall totals
-      totalCases += userCases.length;
-      totalWithRating += userCasesWithRating.length;
-      totalWithMessage += userCasesWithMessage.length;
-      totalRatingButNoMsg += userCasesWithRatingButNoMessage.length;
-
-      // Push user result
-      userAnalytics.push({
-        agent: `${user.firstName} ${user.lastName}`,
-        totalCases: userCases.length,
-        withRating: userCasesWithRating.length,
-        messageSent: userCasesWithMessage.length,
-        ratingButNoMsg: userCasesWithRatingButNoMessage.length,
-        msgRate: userCasesWithRating.length > 0
-          ? `${Math.round((userCasesWithMessage.length / userCasesWithRating.length) * 100)}%`
-          : "0%"
-      });
+      // Detect rating messages
+      if (msg.type === MessageType.INTERACTIVE && msg.text?.includes('How would you rate your experience')) {
+        issueIdsWithMessage.add(msg.issueEventId);
+      }
     }
 
+    // Step 3: Aggregate per user.
+    // totalCases: unique caseIds from messages linked to closed issues.
+    // totalIssues + withRating + messageSent: counted at issue level.
+    type UserAgg = { totalCases: number; totalIssues: number; messageSent: number; withRating: number; ratingButNoMsg: number };
+    const perUser = new Map<number, UserAgg>();
+    const initAgg = (): UserAgg => ({ totalCases: 0, totalIssues: 0, messageSent: 0, withRating: 0, ratingButNoMsg: 0 });
+
+    for (const [userId, caseSet] of casesPerUser) {
+      if (!perUser.has(userId)) perUser.set(userId, initAgg());
+      perUser.get(userId)!.totalCases = caseSet.size;
+    }
+
+    for (const issue of closedIssues) {
+      const userId = issue.userId!;
+      if (!perUser.has(userId)) perUser.set(userId, initAgg());
+      const agg = perUser.get(userId)!;
+      agg.totalIssues += 1;
+      const hasMessage = issueIdsWithMessage.has(issue.id);
+      if (hasMessage) agg.messageSent += 1;
+      if (issue.agentRating !== null) {
+        agg.withRating += 1;
+        if (!hasMessage) agg.ratingButNoMsg += 1;
+      }
+    }
+
+    let totalCases = 0;
+    let totalIssues = 0;
+    let totalWithMessage = 0;
+    let totalWithRating = 0;
+    let totalRatingButNoMsg = 0;
+
+    const userTable = users.map(user => {
+      const agg = perUser.get(user.id) ?? initAgg();
+      totalCases += agg.totalCases;
+      totalIssues += agg.totalIssues;
+      totalWithMessage += agg.messageSent;
+      totalWithRating += agg.withRating;
+      totalRatingButNoMsg += agg.ratingButNoMsg;
+      return {
+        agent: `${user.firstName} ${user.lastName}`,
+        totalCases: agg.totalCases,
+        totalIssues: agg.totalIssues,
+        messageSent: agg.messageSent,
+        withRating: agg.withRating,
+        ratingButNoMsg: agg.ratingButNoMsg,
+        // What % of closed issues got a rating reply from the customer
+        ratingRate: agg.totalIssues > 0
+          ? `${Math.round((agg.withRating / agg.totalIssues) * 100)}%`
+          : '0%',
+        // What % of issues where we sent the message actually got rated
+        conversionRate: agg.messageSent > 0
+          ? `${Math.round((agg.withRating / agg.messageSent) * 100)}%`
+          : '0%',
+      };
+    });
+
     return {
-      period: `${from.toISOString().split('T')[0]} to ${to.toISOString().split('T')[0]}`,
+      period: `${from.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short', hour12: false })} to ${to.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short', hour12: false })} IST`,
       summary: {
-        totalCases: totalCases,
-        casesWithRating: totalWithRating,
+        totalCases,
+        totalIssues,
         messagesSent: totalWithMessage,
+        casesWithRating: totalWithRating,
         ratingWithoutMessage: totalRatingButNoMsg,
-        messageRate: totalWithRating > 0
-          ? `${Math.round((totalWithMessage / totalWithRating) * 100)}%`
-          : "0%"
+        // % of closed issues that received a rating
+        ratingRate: totalIssues > 0
+          ? `${Math.round((totalWithRating / totalIssues) * 100)}%`
+          : '0%',
+        // % of issues where the message was sent that got rated
+        conversionRate: totalWithMessage > 0
+          ? `${Math.round((totalWithRating / totalWithMessage) * 100)}%`
+          : '0%',
       },
-      userTable: userAnalytics
+      userTable,
     };
   }
 
-  /**
-   * Analyzes why chats are expiring.
-   * Returns total count, top bottlenecks (nodes where users drop off), and breakdown by issue type.
-   */
   async getExpiredChatAnalytics(from: Date, to: Date) {
     // 1. Fetch expired events in range
     const expiredEvents = await this.prisma.expiredEvent.findMany({
@@ -1027,8 +1002,8 @@ export class MetricService {
 
     return {
       totalExpired,
-      bottlenecks,
+      bottlenecks
+
     };
   }
-
 }

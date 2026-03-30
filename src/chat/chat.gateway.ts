@@ -36,6 +36,7 @@ import { FailedMessageDto } from './dto/failed-message.dto';
 import { updateIssueDto } from './dto/UpdateIssue.DTO';
 import { UpdateCaseDto } from 'src/cases/dto/update-case.dto';
 import { UpdatedCaseDto } from 'src/cases/dto/udpated-case.dto';
+import { JsonObject, JsonValue } from '@prisma/client/runtime/client';
 
 @WebSocketGateway({
   cors: {
@@ -450,12 +451,14 @@ export class ChatGateway
         })
         currIssueId = issueNew.id
       }
+      const currentIssue = await this.prisma.issueEvent.findUnique({
+        where: { id: currIssueId },
+        select: { agentLinkedAt: true }
+      });
       await this.prisma.issueEvent.update({
-        where: {
-          id: currIssueId
-        },
+        where: { id: currIssueId },
         data: {
-          agentLinkedAt: new Date(),
+          ...(currentIssue.agentLinkedAt === null && { agentLinkedAt: new Date() }),
           userId: payload.userId
         }
       })
@@ -675,7 +678,6 @@ export class ChatGateway
           status: IssueEventStatus.CLOSED, // close the issue
           isActive: false,
           closedAt: new Date(),
-          endTimeAt: new Date(),
           userId,
           // domain fields
           machine_id: machineDetails.machine.machine_id ?? null,
@@ -885,6 +887,7 @@ export class ChatGateway
                 caseId,
                 customerId: caseRecord.customerId,
                 userId: null,
+                ...(assignedTo === 'USER' && { agentCalledAt: new Date() }),
               },
             });
             this.logger.debug(
@@ -1114,6 +1117,7 @@ export class ChatGateway
               caseId,
               customerId: caseRecord.customerId,
               userId: userId,
+              agentCalledAt: new Date(),
             },
           });
           this.logger.debug(
@@ -1675,8 +1679,35 @@ export class ChatGateway
     try {
       const { userId, caseId, templateName, text } = payload;
       this.trackConnection(client, caseId);
-      this.logger.log(templateName)
+      this.logger.log(templateName);
+
       await this.chatService.sendTemplateMessage(templateName, caseId, userId, text);
+
+
+      const result = await this.prisma.case.findUnique({
+        where: { id: caseId },
+        select: { meta: true }
+      });
+
+
+      const metaValue = result?.meta;
+
+
+      const currMeta = typeof metaValue === 'string'
+        ? JSON.parse(metaValue)
+        : (metaValue || {});
+
+      await this.prisma.case.update({
+        where: { id: caseId },
+        data: {
+          meta: {
+            ...(currMeta as object), // Keep existing
+            templateSent: true,
+            templateSentAt: new Date()
+          }
+        }
+      });
+      client.emit('send-t-success', { caseId, userId });
     } catch (error) {
       this.logger.log(`error while handling quick message:${error}`)
     }

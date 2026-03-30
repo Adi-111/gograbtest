@@ -1,11 +1,44 @@
 generator client {
   provider = "prisma-client-js"
-  
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+
+
+model ExpiredEvent {
+  id             Int         @id @default(autoincrement())
   
+  // Relations
+  case           Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  caseId         Int         
+  
+  
+  
+  issueEventId   Int?        
+  
+  // Snapshots
+  customerId     Int         // Denormalized for quick analytics grouping
+  lastAssignedTo CaseHandler
+  totalMessages  Int         @default(0)
+  
+  // Timing details
+  timerSetAt     DateTime    // When the countdown started
+  expiredAt      DateTime    // When the job marked it as expired
+  lastMessageAt  DateTime?   // Time of the very last message in the chat
+  
+  // Traceability
+  lastBotNodeId    String?   // Crucial: The specific step they got stuck on
+  wasAgentNotified Boolean   @default(false)
+
+  createdAt      DateTime    @default(now())
+
+  @@index([caseId])
+  @@index([issueEventId])
+  @@index([createdAt])
+  @@index([lastBotNodeId]) // Recommended: helps find "bottleneck" nodes
 }
 
 
@@ -39,20 +72,12 @@ model Machine {
 }
 
 model Bot {
-  id        Int       @id @default(autoincrement())
   name      String    @default("ChatBot")
-  messages  Message[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  id        Int       @id @default(autoincrement())
   Case      Case[]
-}
-
-enum ReplyType {
-  InteractiveList
-  InteractiveButtons
-  Question
-  Message
-  Media
+  messages  Message[]
 }
 
 model QuickReplies {
@@ -68,68 +93,54 @@ model QuickReplies {
 }
 
 model BotReplies {
-  nodeId       String    @unique // Unique identifier for the reply node
-  flowNodeType ReplyType // Type of node (e.g., InteractiveList, InteractiveButtons, Question, Message)
-  header       Json? // Header content (if applicable)
-  body         Json? // Body content (if applicable)
-  footer       Json? // Footer content (if applicable)
-  action       Json? // Action content (e.g., buttons, sections)
-  replies      Json? // Replies for questions or messages
-  botId        String? // Link to the Bot model
+  nodeId       String    @unique
+  flowNodeType ReplyType
+  header       Json?
+  body         Json?
+  footer       Json?
+  action       Json?
+  replies      Json?
+  botId        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 }
-enum UserRole {
-  Admin
-  Agent
-  Unknown
-}
 
 model User {
-  id                      Int                       @id @default(autoincrement())
   firstName               String
   lastName                String
   email                   String                    @unique
   password                String
-  sessions                Session[]
-  messages                Message[]
-  cases                   Case[]
-  tags                    Tag[]                     @relation("UserTags")
-  notes                   Note[]
-  statusEvent             StatusEvent[]
-  failedMsgEvent          FailedMsgEvent[]
-  role      UserRole?  @default(Unknown)
-  dailyUserMessageSummary DailyUserMessageSummary[]
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
+  id                      Int                       @id @default(autoincrement())
+  role                    UserRole?                 @default(Unknown)
+  cases                   Case[]
+  dailyUserMessageSummary DailyUserMessageSummary[]
+  failedMsgEvent          FailedMsgEvent[]
+  messages                Message[]
+  notes                   Note[]
+  sessions                Session[]
+  statusEvent             StatusEvent[]
+  tags                    Tag[]                     @relation("UserTags")
 }
 
 model DailyUserMessageSummary {
-  id     Int      @id @default(autoincrement())
-  userId Int
-  date   DateTime @db.Date
-
-  // Message references
+  id             Int       @id @default(autoincrement())
+  userId         Int
+  date           DateTime  @db.Date
   firstMessageId Int?
   lastMessageId  Int?
-
-  // Direct timestamp snapshots (redundant but crucial for analytics)
   firstTimestamp DateTime?
   lastTimestamp  DateTime?
-
-  // Optional analytics metrics
-  totalMessages  Int     @default(0)
-  activeDuration Int? // minutes between first & last message
-  firstText      String? @db.Text // optional: store first message text snapshot
-  lastText       String? @db.Text // optional: store last message text snapshot
-
-  // Relations
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstMessage Message? @relation("SummaryFirstMessage", fields: [firstMessageId], references: [id])
-  lastMessage  Message? @relation("SummaryLastMessage", fields: [lastMessageId], references: [id])
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  totalMessages  Int       @default(0)
+  activeDuration Int?
+  firstText      String?
+  lastText       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  firstMessage   Message?  @relation("SummaryFirstMessage", fields: [firstMessageId], references: [id])
+  lastMessage    Message?  @relation("SummaryLastMessage", fields: [lastMessageId], references: [id])
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, date])
   @@index([date])
@@ -137,137 +148,101 @@ model DailyUserMessageSummary {
 }
 
 model Session {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
   token     String
   expiresAt DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
 }
 
 model WhatsAppCustomer {
-  id              Int       @id @default(autoincrement())
-  name            String
   phoneNo         String    @unique
+  createdAt       DateTime  @default(now())
+  name            String
+  id              Int       @id @default(autoincrement())
   profileImageUrl String
   cases           Case[]
-  createdAt       DateTime  @default(now())
   message         Message[]
 }
 
 model Case {
-  id             Int              @id @default(autoincrement())
   status         Status           @default(INITIATED)
   assignedTo     CaseHandler      @default(BOT)
-  unread         Int?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
-  messages       Message[]
-  customer       WhatsAppCustomer @relation(fields: [customerId], references: [id])
+  id             Int              @id @default(autoincrement())
   customerId     Int
-  user           User?            @relation(fields: [userId], references: [id])
   userId         Int?
-  bot            Bot?             @relation(fields: [botId], references: [id])
   botId          Int?
+  unread         Int?
   timer          DateTime?
-  tags           Tag[]            @relation("CaseTags")
   lastBotNodeId  String?
-  lastMessageAt  DateTime?
-  notes          Note[]
   meta           Json?
-  statusEvent    StatusEvent[]
-  failedMsgEvent FailedMsgEvent[]
+  isNewCase      Boolean          @default(true)
   currentIssueId Int?
+  lastMessageAt  DateTime?
+  bot            Bot?             @relation(fields: [botId], references: [id])
+  customer       WhatsAppCustomer @relation(fields: [customerId], references: [id])
+  user           User?            @relation(fields: [userId], references: [id])
+  failedMsgEvent FailedMsgEvent[]
   issueEvents    IssueEvent[]
-  expiredEvents ExpiredEvent[]
-
-  isNewCase Boolean @default(true)
+  expiredEvents  ExpiredEvent[]
+  messages       Message[]
+  notes          Note[]
+  statusEvent    StatusEvent[]
+  tags           Tag[]            @relation("CaseTags")
 
   @@index([status])
   @@index([customerId])
 }
 
-enum IssueEventStatus {
-  OPEN
-  CLOSED
-}
-
-//
-// NEW: issue taxonomy
-//
-enum IssueType {
-  REFUND
-  MACHINE_OFFLINE
-  MACHINE_NOT_WORKING
-  FEEDBACK
-  MACHINE_NOT_REFILLED
-  INACTIVE
-  OTHER
-}
-
-//
-// NEW: refund mode
-//
-enum RefundMode {
-  AUTO
-  MANUAL
-}
-
 model IssueEvent {
-  id         Int  @id @default(autoincrement())
-  caseId     Int
-  customerId Int
-  userId     Int?
-
-  // lifecycle
-  status   IssueEventStatus @default(OPEN)
-  isActive Boolean          @default(true)
-  openedAt DateTime         @default(now())
-  closedAt DateTime?
-
-  // domain fields
-  machine_id  String?
-  machineName String?
-  issueType   IssueType   @default(OTHER) // NEW
-  refundMode  RefundMode? // NEW; only when issueType = REFUND
-
-  utr           String?
-  falsePositive Boolean?
-  coil          Int?
-  orderTime     String?
-
+  id                Int              @id @default(autoincrement())
+  caseId            Int
+  customerId        Int
+  userId            Int?
+  status            IssueEventStatus @default(OPEN)
+  isActive          Boolean          @default(true)
+  openedAt          DateTime         @default(now())
+  closedAt          DateTime?
+  machineName       String?
+  issueType         IssueType        @default(OTHER)
+  refundMode        RefundMode?
   refundAmountMinor Int?
-
-  resolutionNotes String? // NEW (formerly issueDetails)
-
-  agentCalledAt DateTime?
-  agentLinkedAt DateTime?
-  endTimeAt     DateTime?
-  agentRating Int?
-
-  messages Message[] @relation("IssueMessages")
-  case     Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
-
-  created_at DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  resolutionNotes   String?
+  agentCalledAt     DateTime?
+  agentLinkedAt     DateTime?
+  endTimeAt         DateTime?
+  created_at        DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  falsePositive     Boolean?
+  machine_id        String?
+  utr               String?
+  coil              Int?
+  orderTime         String?
+  agentRating       Int?
+  case              Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  messages          Message[]
 
   @@index([caseId])
   @@index([status, isActive])
   @@index([issueType])
+  @@index([userId, status, closedAt])
 }
 
 model StatusEvent {
   id             Int      @id @default(autoincrement())
   caseId         Int
-  case           Case     @relation(fields: [caseId], references: [id])
   userId         Int?
-  user           User?    @relation(fields: [userId], references: [id])
   previousStatus Status
   newStatus      Status
   timestamp      DateTime @default(now())
+  case           Case     @relation(fields: [caseId], references: [id])
+  user           User?    @relation(fields: [userId], references: [id])
 
   @@index([caseId])
 }
@@ -275,13 +250,13 @@ model StatusEvent {
 model FailedMsgEvent {
   id        Int      @id @default(autoincrement())
   caseId    Int
-  case      Case     @relation(fields: [caseId], references: [id])
   userId    Int
-  user      User     @relation(fields: [userId], references: [id])
   text      String
   timestamp DateTime @default(now())
   tries     Int
   messageId Int
+  case      Case     @relation(fields: [caseId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
 
   @@index([caseId])
 }
@@ -289,90 +264,90 @@ model FailedMsgEvent {
 model Note {
   id        Int      @id @default(autoincrement())
   userId    Int
-  user      User     @relation(fields: [userId], references: [id])
   caseId    Int
-  case      Case     @relation(fields: [caseId], references: [id])
   text      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  case      Case     @relation(fields: [caseId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
 }
 
 model Tag {
   id        Int      @id @default(autoincrement())
   text      String   @unique
   userId    Int
-  user      User     @relation("UserTags", fields: [userId], references: [id])
-  cases     Case[]   @relation("CaseTags")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  user      User     @relation("UserTags", fields: [userId], references: [id])
+  cases     Case[]   @relation("CaseTags")
 }
 
 model Message {
-  id           Int                  @id @default(autoincrement())
-  type         MessageType
-  replyType    ReplyType?
-  senderType   SenderType
-  text         String?
-  recipient    String?
-  timestamp    DateTime             @default(now())
-  waMessageId  String?
-  context      Json?
-  media        Media?
-  location     Location?
-  contacts     Contact[]
-  interactive  Interactive?
-  systemStatus SystemMessageStatus?
-  error        Json?
-
-  // Relationships
-  user               User?             @relation(fields: [userId], references: [id])
-  userId             Int?
-  bot                Bot?              @relation(fields: [botId], references: [id])
-  botId              Int?
-  parentMessage      Message?          @relation("MessageReplies", fields: [parentMessageId], references: [id])
-  parentMessageId    Int?
-  replies            Message[]         @relation("MessageReplies")
-  case               Case?             @relation(fields: [caseId], references: [id])
-  caseId             Int?
-  WhatsAppCustomer   WhatsAppCustomer? @relation(fields: [whatsAppCustomerId], references: [id])
+  type               MessageType
+  replyType          ReplyType?
+  senderType         SenderType
+  text               String?
+  recipient          String?
+  timestamp          DateTime                  @default(now())
+  waMessageId        String?
+  context            Json?
+  systemStatus       SystemMessageStatus?
+  error              Json?
   whatsAppCustomerId Int?
-  issueEvent         IssueEvent?       @relation("IssueMessages", fields: [issueEventId], references: [id])
+  id                 Int                       @id @default(autoincrement())
+  userId             Int?
+  botId              Int?
+  parentMessageId    Int?
+  caseId             Int?
   issueEventId       Int?
-
-  firstInSummaries DailyUserMessageSummary[] @relation("SummaryFirstMessage")
-  lastInSummaries  DailyUserMessageSummary[] @relation("SummaryLastMessage")
+  contacts           Contact[]
+  firstInSummaries   DailyUserMessageSummary[] @relation("SummaryFirstMessage")
+  lastInSummaries    DailyUserMessageSummary[] @relation("SummaryLastMessage")
+  interactive        Interactive?
+  location           Location?
+  media              Media?
+  bot                Bot?                      @relation(fields: [botId], references: [id])
+  case               Case?                     @relation(fields: [caseId], references: [id])
+  issueEvent         IssueEvent?               @relation(fields: [issueEventId], references: [id])
+  parentMessage      Message?                  @relation("MessageReplies", fields: [parentMessageId], references: [id])
+  replies            Message[]                 @relation("MessageReplies")
+  user               User?                     @relation(fields: [userId], references: [id])
+  WhatsAppCustomer   WhatsAppCustomer?         @relation(fields: [whatsAppCustomerId], references: [id])
 
   @@index([senderType])
   @@index([recipient])
   @@index([timestamp])
   @@index([type])
+  @@index([caseId])
+  @@index([caseId, timestamp(sort: Desc)])
+  @@index([issueEventId, timestamp])
 }
 
 model Media {
-  id        Int      @id @default(autoincrement())
-  message   Message? @relation(fields: [messageId], references: [id])
-  messageId Int?     @unique
-  waMediaId String?
   url       String
   mimeType  String
   caption   String?
   fileName  String?
   size      Int?
-  duration  Int? // For audio/video
-  height    Int? // For images/video
-  width     Int? // For images/video
+  duration  Int?
+  height    Int?
+  width     Int?
+  id        Int      @id @default(autoincrement())
+  messageId Int?     @unique
+  waMediaId String?
+  message   Message? @relation(fields: [messageId], references: [id])
 }
 
 model Location {
-  id        Int      @id @default(autoincrement())
-  message   Message? @relation(fields: [messageId], references: [id])
-  messageId Int?     @unique
   latitude  Float
   longitude Float
   name      String?
   address   String?
-  url       String? // Map link
-  accuracy  Float? // Location accuracy in meters
+  url       String?
+  accuracy  Float?
+  id        Int      @id @default(autoincrement())
+  messageId Int?     @unique
+  message   Message? @relation(fields: [messageId], references: [id])
 }
 
 model Product {
@@ -397,35 +372,141 @@ model Product {
 }
 
 model Contact {
-  id        Int       @id @default(autoincrement())
-  message   Message?  @relation(fields: [messageId], references: [id])
-  messageId Int?
-  name      Json? // Structured name {formatted_name, first_name, last_name...}
-  phones    Json // Array of phone numbers with type
-  emails    Json? // Array of emails
-  addresses Json? // Array of addresses
-  org       Json? // Organization details
+  name      Json?
+  phones    Json
+  emails    Json?
+  addresses Json?
+  org       Json?
   birthday  DateTime?
-  urls      Json? // Array of URLs
+  urls      Json?
+  id        Int       @id @default(autoincrement())
+  messageId Int?
+  message   Message?  @relation(fields: [messageId], references: [id])
 }
 
 model Interactive {
+  type         String
+  header       Json?
+  body         Json?
+  footer       Json?
+  action       Json
+  parameters   Json?
+  userResponse Json?
   id           Int      @id @default(autoincrement())
-  message      Message? @relation(fields: [messageId], references: [id])
   messageId    Int?     @unique
-  type         String // button, list, product, etc.
-  header       Json? // Interactive header content
-  body         Json? // Interactive body content
-  footer       Json? // Interactive footer content
-  action       Json // Interactive action (buttons, sections)
-  parameters   Json? // Additional parameters
-  userResponse Json? // Store user's response
+  message      Message? @relation(fields: [messageId], references: [id])
 }
 
-// Remaining models (Media, Location, Contact, Interactive) stay similar but:
-// - Use String IDs
-// - Add createdAt/updatedAt
-// - Adjust relations as needed
+model CustomerOrderDetails {
+  id               Int      @id @default(autoincrement())
+  customerId       Int
+  coils            String[]
+  productIds       String[]
+  dispenseStatuses String[]
+  machine_id       String?
+  verdict          String?
+  orderTime        DateTime
+  created_at       DateTime @default(now())
+}
+
+model DailyAnalytics {
+  id                    Int      @id @default(autoincrement())
+  date                  DateTime @unique @db.Date
+  casesOpened           Int      @default(0)
+  casesPending          Int      @default(0)
+  casesSolved           Int      @default(0)
+  casesSolvedByOperator Int      @default(0)
+  casesSolvedByBot      Int      @default(0)
+  casesExpired          Int      @default(0)
+  casesProcessing       Int      @default(0)
+  missedChats           Int      @default(0)
+  avgCaseDuration       Float?   @default(0)
+  totalCaseDuration     Float?   @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([date])
+}
+
+model TagAnalytics {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @db.Date
+  tagText   String
+  count     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, tagText])
+  @@index([date])
+  @@index([tagText])
+}
+
+model OverallAnalytics {
+  id                    Int      @id @default(autoincrement())
+  totalCases            Int      @default(0)
+  casesProcessing       Int      @default(0)
+  casesSolved           Int      @default(0)
+  casesSolvedByBot      Int      @default(0)
+  casesSolvedByOperator Int      @default(0)
+  casesExpired          Int      @default(0)
+  casesOpen             Int      @default(0)
+  lastUpdated           DateTime @default(now())
+
+  @@map("overall_analytics")
+}
+
+model HourlyAnalytics {
+  id                    Int      @id @default(autoincrement())
+  datetime              DateTime @unique
+  casesOpened           Int      @default(0)
+  casesPending          Int      @default(0)
+  casesSolved           Int      @default(0)
+  casesSolvedByOperator Int      @default(0)
+  casesSolvedByBot      Int      @default(0)
+  casesExpired          Int      @default(0)
+  casesProcessing       Int      @default(0)
+  missedChats           Int      @default(0)
+  avgCaseDuration       Float?   @default(0)
+  totalCaseDuration     Float?   @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([datetime])
+}
+
+enum ReplyType {
+  InteractiveList
+  InteractiveButtons
+  Question
+  Message
+  Media
+}
+
+enum UserRole {
+  Admin
+  Agent
+  Unknown
+}
+
+enum IssueEventStatus {
+  OPEN
+  CLOSED
+}
+
+enum IssueType {
+  REFUND
+  MACHINE_OFFLINE
+  MACHINE_NOT_WORKING
+  FEEDBACK
+  MACHINE_NOT_REFILLED
+  OTHER
+  INACTIVE
+}
+
+enum RefundMode {
+  AUTO
+  MANUAL
+}
 
 enum MessageType {
   TEXT
@@ -469,132 +550,4 @@ enum Status {
 enum CaseHandler {
   USER
   BOT
-}
-
-model CustomerOrderDetails {
-  id               Int      @id @default(autoincrement())
-  customerId       Int
-  coils            String[]
-  productIds       String[]
-  dispenseStatuses String[]
-  machine_id       String?
-  verdict          String?
-  orderTime        DateTime
-  created_at       DateTime @default(now())
-}
-
-model DailyAnalytics {
-  id   Int      @id @default(autoincrement())
-  date DateTime @unique @db.Date
-
-  // Basic counts
-  casesOpened           Int @default(0)
-  casesPending          Int @default(0)
-  casesSolved           Int @default(0)
-  casesSolvedByOperator Int @default(0)
-  casesSolvedByBot      Int @default(0)
-  casesExpired          Int @default(0)
-  casesProcessing       Int @default(0)
-  missedChats           Int @default(0)
-
-  // Duration metrics (in minutes)
-  avgCaseDuration   Float? @default(0)
-  totalCaseDuration Float? @default(0)
-
-  // Metadata
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([date])
-}
-
-model TagAnalytics {
-  id      Int      @id @default(autoincrement())
-  date    DateTime @db.Date
-  tagText String
-  count   Int      @default(0)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([date, tagText])
-  @@index([date])
-  @@index([tagText])
-}
-
-model OverallAnalytics {
-  id Int @id @default(autoincrement())
-
-  // Current state counters
-  totalCases            Int @default(0)
-  casesProcessing       Int @default(0)
-  casesSolved           Int @default(0)
-  casesSolvedByBot      Int @default(0)
-  casesSolvedByOperator Int @default(0)
-  casesExpired          Int @default(0)
-  casesOpen             Int @default(0)
-
-  // Last updated
-  lastUpdated DateTime @default(now())
-
-  @@map("overall_analytics")
-}
-
-model HourlyAnalytics {
-  id       Int      @id @default(autoincrement())
-  datetime DateTime @unique // Stores date + hour (e.g., 2025-01-15 14:00:00)
-
-  // Basic counts for this hour
-  casesOpened           Int @default(0)
-  casesPending          Int @default(0)
-  casesSolved           Int @default(0)
-  casesSolvedByOperator Int @default(0)
-  casesSolvedByBot      Int @default(0)
-  casesExpired          Int @default(0)
-  casesProcessing       Int @default(0)
-  missedChats           Int @default(0)
-
-  // Duration metrics (in minutes)
-  avgCaseDuration   Float? @default(0)
-  totalCaseDuration Float? @default(0)
-
-  // Metadata
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([datetime])
-}
-
-
-model ExpiredEvent {
-  id             Int         @id @default(autoincrement())
-  
-  // Relations
-  case           Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  caseId         Int         @unique // One expiration event per case
-  
-  
-  
-  issueEventId   Int?        
-  
-  // Snapshots
-  customerId     Int         // Denormalized for quick analytics grouping
-  lastAssignedTo CaseHandler
-  totalMessages  Int         @default(0)
-  
-  // Timing details
-  timerSetAt     DateTime    // When the countdown started
-  expiredAt      DateTime    // When the job marked it as expired
-  lastMessageAt  DateTime?   // Time of the very last message in the chat
-  
-  // Traceability
-  lastBotNodeId    String?   // Crucial: The specific step they got stuck on
-  wasAgentNotified Boolean   @default(false)
-
-  createdAt      DateTime    @default(now())
-
-  @@index([caseId])
-  @@index([issueEventId])
-  @@index([createdAt])
-  @@index([lastBotNodeId]) // Recommended: helps find "bottleneck" nodes
 }

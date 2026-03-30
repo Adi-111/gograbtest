@@ -87,7 +87,6 @@ export class MetricController {
     return await this.metricService.getManualRefundTrendPerAgent({
       fromIST,
       toIST,
-      mode: mode || 'opened',
     });
   }
 

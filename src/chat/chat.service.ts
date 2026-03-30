@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { MessageType, SenderType, SystemMessageStatus, ReplyType, Case, Status, CaseHandler, QuickReplies } from '@prisma/client';
+import { MessageType, SenderType, SystemMessageStatus, ReplyType, Case, Status, CaseHandler, QuickReplies, Prisma } from '@prisma/client';
 import { ChatGateway } from './chat.gateway';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateMessageDto } from './dto/create-message.dto';
@@ -179,14 +179,7 @@ export class ChatService {
             const limitNum = Math.min(Math.max(1, limit), 100); // Cap at 100
             const skip = (pageNum - 1) * limitNum;
 
-            const caseExists = await this.prisma.case.findUnique({
-                where: { id: caseId },
-                include: { customer: true, user: true },
-            });
 
-            if (!caseExists) {
-                throw new Error(`Case ${caseId} not found`);
-            }
 
             // Get total message count for pagination
             const totalMessages = await this.prisma.message.count({
@@ -204,13 +197,30 @@ export class ChatService {
                     text: true,
                     recipient: true,
                     timestamp: true,
-                    user: true,
-                    bot: true,
-                    WhatsAppCustomer: true,
+                    user: {
+                        select: {
+                            id: true,
+                            firstName: true,
+                            lastName: true,
+                            email: true,
+                            role: true,
+
+                        }
+                    },
+                    userId: true,
+
+                    WhatsAppCustomer: {
+                        select: {
+                            id: true,
+                            name: true,
+                            phoneNo: true,
+                            profileImageUrl: true,
+                        }
+                    },
                     media: true,
                     location: true,
                     interactive: true,
-                    case: true,
+                    caseId: true
                 },
                 orderBy: { timestamp: 'desc' },
                 skip,
@@ -220,7 +230,7 @@ export class ChatService {
             const totalPages = Math.ceil(totalMessages / limitNum);
 
             return {
-                caseExists,
+
                 messages: messages.reverse(),
                 pagination: {
                     page: pageNum,
@@ -263,7 +273,7 @@ export class ChatService {
     }
 
     /**
-     * Get case events (issue events and status events) for a case
+     * Get case events (issue events , status events and expired events) for a case
      * Call this after joinCase() to load events for the timeline/context panel
      * @param caseId - The case ID
      * @param since - Optional: Filter events from this timestamp onwards
@@ -289,7 +299,7 @@ export class ChatService {
             } : undefined;
 
             // Fetch issue events and status events in parallel
-            const [issueEventsRaw, statusEvents] = await Promise.all([
+            const [issueEventsRaw, statusEvents, expiredEventRaw] = await Promise.all([
                 this.prisma.issueEvent.findMany({
                     where: {
                         caseId,
@@ -306,6 +316,13 @@ export class ChatService {
                     include: { user: true },
                     orderBy: { timestamp: 'asc' },
                 }),
+                this.prisma.expiredEvent.findMany({
+                    where: {
+                        caseId,
+                        ...(whereCondition && { timerSetAt: whereCondition }),
+                    },
+                    orderBy: { timerSetAt: 'asc' }
+                })
             ]);
 
             // Map issue events to include timestamp from closedAt
@@ -314,9 +331,29 @@ export class ChatService {
                 timestamp: el.closedAt,
             }));
 
+            // Deduplicate by timerSetAt: cron creates one entry per IST day for
+            // cases that remain expired, so multiple rows can share the same
+            // underlying timer (= same logical expiry). Keep only the earliest
+            // record for each unique timerSetAt so the frontend timeline shows
+            // one marker per expiry event, while still preserving separate
+            // markers for cases that expired, were solved, and expired again.
+            const seenTimers = new Set<number>();
+            const expiredEvent = expiredEventRaw
+                .filter(el => {
+                    const key = el.timerSetAt?.getTime() ?? el.id;
+                    if (seenTimers.has(key)) return false;
+                    seenTimers.add(key);
+                    return true;
+                })
+                .map(el => ({
+                    ...el,
+                    timestamp: el.timerSetAt,
+                }));
+
             return {
                 issueEvents,
                 statusEvents,
+                expiredEvent
             };
         } catch (error) {
             const err = error as AxiosError<any>;
@@ -564,6 +601,7 @@ export class ChatService {
                     customer: { select: { name: true } },
                     unread: true,
                     status: true,
+                    timer: true,
                     assignedTo: true,
                     currentIssueId: true,
                     user: { select: { firstName: true } },
@@ -573,7 +611,8 @@ export class ChatService {
             if (!caseRecord) {
                 return null;
             }
-            const customer_name = caseRecord.customer.name
+            const customer_name = caseRecord.customer.name;
+
 
             // Determine handler - fetch issue only if needed
             let handler: string;
@@ -597,11 +636,13 @@ export class ChatService {
                 handler = caseRecord.assignedTo;
             }
 
+
             return {
                 customer_name,
                 unread: caseRecord.unread,
                 handler,
-                status: caseRecord.status
+                status: caseRecord.status,
+                timer: caseRecord.timer,
             };
         } catch (error) {
             const err = error as AxiosError<any>;
@@ -737,6 +778,7 @@ export class ChatService {
                     data: {
                         ...baseData,
                         case: { connect: { id: createMessageDto.caseId } },
+                        issueEvent: { connect: { id: issueId } },
                         ...(createMessageDto.userId && { user: { connect: { id: createMessageDto.userId } } }),
                         ...(createMessageDto.botId && { bot: { connect: { id: createMessageDto.botId } } }),
                         ...(createMessageDto.whatsAppCustomerId && {
@@ -775,7 +817,7 @@ export class ChatService {
                 }
 
                 return { messageId: message.id, caseId: message.caseId };
-            })
+            }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
             // ----------------------------
             // STEP 2: Fetch Full Message (Heavy Query)
             // ----------------------------
@@ -1226,7 +1268,7 @@ export class ChatService {
         // 1) Fetch case + customer
         const caseRecord = await this.prisma.case.findUnique({
             where: { id: caseId },
-            select: { customer: { select: { name: true, phoneNo: true } } }
+            select: { currentIssueId: true, customer: { select: { name: true, phoneNo: true } } }
         });
 
 
@@ -1242,6 +1284,7 @@ export class ChatService {
                 senderType: SenderType.USER,
                 caseId,
                 userId,
+                ...(caseRecord.currentIssueId && { issueEventId: caseRecord.currentIssueId }),
                 systemStatus: SystemMessageStatus.SENT,
                 timestamp: new Date(),
                 recipient: to,
@@ -1383,6 +1426,51 @@ export class ChatService {
     async getMachineDetails() {
         const data: MachineDetailsDto[] = await this.customerService.machineDetails();
         return data
+    }
+
+
+    async ChatByIssues(caseId: number) {
+        let issueId = (await this.prisma.case.findUnique({
+            where: {
+                id: caseId
+            },
+            select: {
+                currentIssueId: true
+            }
+        })).currentIssueId;
+        this.logger.log(`issueId:${issueId}`)
+        if (!issueId || issueId === null) {
+            this.logger.log(`no current-issue was found with caseId:${caseId}`)
+            const latestIssue = await this.prisma.issueEvent.findFirst({
+                where: { caseId },
+                orderBy: { created_at: 'desc' },
+                select: { id: true }
+            });
+            if (!latestIssue) {
+                this.logger.log(`no issues found for caseId:${caseId}`);
+                return [];
+            }
+            issueId = latestIssue.id;
+        }
+        const messagesFromIssue = (await this.prisma.issueEvent.findUnique({
+            where: {
+                id: issueId
+            },
+            select: {
+                messages: {
+                    orderBy: {
+                        timestamp: 'desc'
+                    }
+                }
+            }
+        })).messages;
+
+        return messagesFromIssue;
+
+
+
+
+
     }
 
 

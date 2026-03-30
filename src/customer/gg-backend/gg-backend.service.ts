@@ -10,7 +10,7 @@ import { MergedProductDetail, ProductDetailProp } from "../types";
 import { JwtPayload, decode } from 'jsonwebtoken';
 import * as newrelic from 'newrelic';
 import { MachineDto } from "./dto/machine.dto";
-import { IssueType } from "@prisma/client";
+
 
 
 export type AgentFRTSummary = {
@@ -502,7 +502,7 @@ export class GGBackendService {
                             total_coils: item.total_coils,
                             password: item.password,
                             date_created: item.date_created ? new Date(item.date_created) : undefined,
-                            left_units: item.left_units,
+                            left_units: item.left_units || 0,
                             last_refill_time: item.last_refill_time ? new Date(item.last_refill_time) : undefined,
                             last_refill_by: item.last_refill_by,
                             last_refill_availability: item.last_refill_availability,
@@ -529,7 +529,7 @@ export class GGBackendService {
                             total_coils: item.total_coils,
                             password: item.password,
                             date_created: item.date_created ? new Date(item.date_created) : new Date(),
-                            left_units: item.left_units,
+                            left_units: item.left_units || 0,
                             last_refill_time: item.last_refill_time ? new Date(item.last_refill_time) : undefined,
                             last_refill_by: item.last_refill_by,
                             last_refill_availability: item.last_refill_availability,

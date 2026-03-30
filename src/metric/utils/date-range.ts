@@ -19,13 +19,26 @@ function istToUTC(istDate: Date): Date {
     return new Date(istDate.getTime() - IST_OFFSET_MS);
 }
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Returns the UTC instant for 00:00:01 IST on the current IST calendar day.
+ */
+function getStartOfTodayIST(): Date {
+    const nowUTC = new Date();
+    const istNow = new Date(nowUTC.getTime() + IST_OFFSET_MS);
+    const y = istNow.getUTCFullYear();
+    const m = istNow.getUTCMonth();
+    const d = istNow.getUTCDate();
+    return new Date(Date.UTC(y, m, d, 0, 0, 1, 0) - IST_OFFSET_MS);
+}
+
 /**
  * Utility to resolve a date range either from a preset or from explicit params.
  * Returns UTC Date objects for database queries, but respects IST day/month boundaries.
- * 
- * Example: At 12:05 AM IST on Dec 7:
- * - "today" preset → Dec 7 00:00 IST to now = Dec 6 18:30 UTC to Dec 6 18:35 UTC
- * - "1d" preset → rolling 24 hours back
+ *
+ * - "today" → 00:00:01 IST today to current time
+ * - "1d" → last 24 hours (current time - 24h to current time)
  */
 export function resolveRange(
     preset?: "today" | "1d" | "7d" | "30d",
@@ -40,12 +53,12 @@ export function resolveRange(
 
     switch (preset) {
         case "today":
-            // Start of today in IST (midnight IST)
-            rangeFromIST = startOfDay(nowInIST);
+            // 00:00:01 IST today to current time (IST day boundary, 1s past midnight)
+            rangeFromIST = new Date(getStartOfTodayIST().getTime() + IST_OFFSET_MS);
             break;
         case "1d":
-            // Rolling 24 hours (but from IST day start for consistency)
-            rangeFromIST = startOfDay(subDays(nowInIST, 1));
+            // Rolling 24 hours: (now - 24h) to now
+            rangeFromIST = new Date(nowUTC.getTime() - ONE_DAY_MS + IST_OFFSET_MS);
             break;
         case "7d":
             rangeFromIST = startOfDay(subDays(nowInIST, 7));

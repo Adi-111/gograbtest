@@ -1,6 +1,6 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosError } from 'axios';
-import { CaseHandler, Status, MessageType, SenderType, ReplyType, Prisma } from '@prisma/client';
+import { CaseHandler, Status, MessageType, SenderType, ReplyType, Prisma, Message } from '@prisma/client';
 import * as newrelic from 'newrelic';
 import { ChatService } from 'src/chat/chat.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -414,10 +414,10 @@ export class CustomerService {
         const currentTime = Math.floor(Date.now() / 1000);
         const messageTimestamp = parseInt(message.timestamp);
 
-        // if (currentTime - messageTimestamp > 15) {
-        //     this.logger.warn(`Skipping old message. Message timestamp: ${messageTimestamp}, Current timestamp: ${currentTime}`);
-        //     return null;
-        // }
+        if (currentTime - messageTimestamp > 15) {
+            this.logger.warn(`Skipping old message. Message timestamp: ${messageTimestamp}, Current timestamp: ${currentTime}`);
+            return null;
+        }
 
         // Queue the message for async processing
         try {
@@ -508,10 +508,16 @@ export class CustomerService {
         const phoneNo = String(message.from);
         const contact = value?.contacts?.[0];
 
+        // Detect agent rating reply before case management to prevent reopening a solved case
+        const isAgentRatingReply =
+            message?.type === 'interactive' &&
+            message?.interactive?.list_reply &&
+            String(message?.interactive?.list_reply?.id || '').charAt(0) === 'u';
+
         try {
             const customer = await this.handleCustomerProfile(phoneNo, contact);
-            const caseRecord = await this.handleCaseManagement(customer.id);
-            const storedMessage = await this.storeIncomingMessage(message, customer.id, caseRecord.id);
+            const caseRecord = await this.handleCaseManagement(customer.id, isAgentRatingReply);
+            const storedMessage = await this.storeIncomingMessage(message, customer.id, caseRecord.id, caseRecord.currentIssueId);
             await this.handleTimer(caseRecord.id);
 
             // Check if it's off-time (9 PM UTC to 3 AM UTC) and send off-time message for specific bot nodes
@@ -559,37 +565,36 @@ export class CustomerService {
 
 
 
+            // ---------------------------------------------
+            // 🔵 RATING HANDLER (Agent Interactive List)
+            // Runs regardless of assignedTo — agent-resolved cases are rated too
+            // ---------------------------------------------
+            if (
+                message?.type === 'interactive' &&
+                message?.interactive?.list_reply &&
+                caseRecord.lastBotNodeId === 'agent-interactive'
+            ) {
+                const replyId = message.interactive.list_reply.id;
+                if (String(replyId).charAt(0) === 'u') {
+                    await this.handleAgentRating(replyId, caseRecord.id, storedMessage.id);
+                }
+
+                // Clear lastBotNodeId so bot does not get stuck
+                await this.prisma.case.update({
+                    where: { id: caseRecord.id },
+                    data: { lastBotNodeId: null }
+                });
+
+                this.logger.log(`Agent Rating saved via ${replyId}`);
+                return { customer, case: caseRecord };
+            }
+            // ---------------------------------------------
+
             // Bot handling: process interactive reply types if applicable.
             if (caseRecord.assignedTo === CaseHandler.BOT
                 && !caseRecord.isNewCase
             ) {
                 let botContent: string | undefined;
-
-                // ---------------------------------------------
-                // 🔵 RATING HANDLER (Agent Interactive List)
-                // ---------------------------------------------
-                if (
-                    message?.type === 'interactive' &&
-                    message?.interactive?.list_reply &&
-                    caseRecord.lastBotNodeId === 'agent-interactive'
-                ) {
-                    const replyId = message.interactive.list_reply.id;
-                    if (String(replyId).charAt(0) === 'u') {
-                        await this.handleAgentRating(replyId, caseRecord.id);
-                    }
-
-
-
-                    // Clear lastBotNodeId so bot does not get stuck
-                    await this.prisma.case.update({
-                        where: { id: caseRecord.id },
-                        data: { lastBotNodeId: null }
-                    });
-
-                    this.logger.log(`Agent Rating saved via ${replyId}`);
-                    return { customer, case: caseRecord };
-                }
-                // ---------------------------------------------
 
                 if (message.type === 'interactive') {
                     if (message.interactive?.button_reply) {
@@ -963,7 +968,7 @@ export class CustomerService {
     }
 
 
-    private async handleCaseManagement(customerId: number) {
+    private async handleCaseManagement(customerId: number, skipReopen: boolean = false) {
         const activeCase = await this.prisma.case.findFirst({
             where: {
                 customerId,
@@ -971,22 +976,29 @@ export class CustomerService {
             include: { customer: true, }
         });
         if (activeCase && activeCase.currentIssueId === null) {
-            const issueEvent = await this.prisma.issueEvent.create({
-                data: {
-                    caseId: activeCase.id,
-                    customerId: customerId,
-                }
-            })
-            await this.prisma.case.update({
-                where: {
-                    id: activeCase.id,
-                    assignedTo: CaseHandler.BOT,
-                },
-                data: {
-                    currentIssueId: issueEvent.id,
-                }
-            })
-            this.logger.log(issueEvent.id)
+            await this.prisma.$transaction(async (tx) => {
+                // Re-check inside transaction to prevent race condition
+                const freshCase = await tx.case.findUnique({
+                    where: { id: activeCase.id },
+                    select: { currentIssueId: true }
+                });
+                if (freshCase.currentIssueId !== null) return;
+
+                const issueEvent = await tx.issueEvent.create({
+                    data: {
+                        caseId: activeCase.id,
+                        customerId: customerId,
+                    }
+                });
+                await tx.case.update({
+                    where: { id: activeCase.id },
+                    data: {
+                        currentIssueId: issueEvent.id,
+                        assignedTo: CaseHandler.BOT
+                    }
+                });
+                this.logger.log(issueEvent.id);
+            }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
         }
         if (!activeCase) {
             const newCase = await this.prisma.case.create({
@@ -1044,7 +1056,7 @@ export class CustomerService {
         const condition1 = activeCase && activeCase.status === Status.SOLVED;
         const condition2 = targetTime() !== null && targetTime() < now;
 
-        if (condition1 || condition2) {
+        if ((condition1 || condition2) && !skipReopen) {
             this.logger.log("welcome2")
             await this.chatService.triggerStatusUpdateBot(activeCase.id, Status.INITIATED, 'BOT')
             await this.botService.sendWelcomeMsg(activeCase.customer.phoneNo, activeCase.id);
@@ -1122,7 +1134,8 @@ export class CustomerService {
     private async storeIncomingMessage(
         message: any,
         customerId: number,
-        caseId: number
+        caseId: number,
+        issueEventId?: number
     ) {
         let media;
         let locationData;
@@ -1188,8 +1201,9 @@ export class CustomerService {
             timestamp: new Date(parseInt(message.timestamp) * 1000),
             waMessageId: message.id,
             text: content,
+            ...(issueEventId ? { issueEventId } : {}),
             ...(media ? { media } : {}),
-            ...(locationData ? { location: locationData } : {}), // <— NEW
+            ...(locationData ? { location: locationData } : {}),
 
         };
 
@@ -1441,34 +1455,13 @@ export class CustomerService {
 
     private async handleTimer(caseId: number) {
         try {
-            const now = new Date();
             // Retrieve the current timer field (if needed)
             const caseRecord = await this.prisma.case.findUnique({
                 where: { id: caseId },
-                select: { timer: true, customerId: true, assignedTo: true, lastBotNodeId: true, currentIssueId: true, _count: { select: { messages: true } } }
+                select: { timer: true }
             });
 
             if (caseRecord && caseRecord.timer) {
-
-                if (caseRecord.timer < now) {
-                    this.logger.log(`[Tracker] Case ${caseId} expired (detected in handleTimer). Logging event.`);
-                    await this.prisma.expiredEvent.create({
-                        data: {
-                            caseId: caseId,
-                            customerId: caseRecord.customerId,
-                            lastAssignedTo: caseRecord.assignedTo,
-
-                            // Timing
-                            timerSetAt: caseRecord.timer,
-                            expiredAt: now,
-
-                            // Context
-                            lastBotNodeId: caseRecord.lastBotNodeId,
-                            issueEventId: caseRecord.currentIssueId, // Nullable, so it's safe
-                            totalMessages: caseRecord._count.messages,
-                        }
-                    });
-                }
                 // Calculate 24 hours in the future
                 const newTimer = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -1497,7 +1490,8 @@ export class CustomerService {
         await this.gg_backend_service.getAllMachinesFromGG();
     }
 
-    async handleAgentRating(replyId: string, caseId: number) {
+    async handleAgentRating(replyId: string, caseId: number, messagId: number) {
+
         const ratingMap: Record<string, number> = {
             ui1: 1,
             ui2: 2,
@@ -1512,6 +1506,7 @@ export class CustomerService {
             this.logger.warn(`Invalid rating replyId received: ${replyId}`);
             return;
         }
+        let issueIdForRating: number | null = null;
 
         // Find active issue
         const caseRecord = await this.prisma.case.findUnique({
@@ -1519,14 +1514,41 @@ export class CustomerService {
             select: { currentIssueId: true }
         });
 
-        if (!caseRecord?.currentIssueId) {
-            this.logger.error(`No active issue found for rating caseId ${caseId}`);
+        if (!caseRecord) {
+            this.logger.error(`Case not found for caseId ${caseId}`);
             return;
         }
 
+        if (caseRecord.currentIssueId) {
+            issueIdForRating = caseRecord.currentIssueId;
+        } else {
+            // Issue was already closed before rating came in — fall back to last closed issue
+            const lastClosedIssue = await this.prisma.issueEvent.findFirst({
+                where: { caseId, status: 'CLOSED' },
+                orderBy: { closedAt: 'desc' },
+                select: { id: true }
+            });
+
+            if (!lastClosedIssue) {
+                this.logger.error(`No issue found (active or closed) for rating caseId ${caseId}`);
+                return;
+            }
+            issueIdForRating = lastClosedIssue.id;
+        }
+
+        // Always link the rating message to the resolved issue
+        await this.prisma.message.update({
+            where: { id: messagId },
+            data: {
+                issueEvent: {
+                    connect: { id: issueIdForRating }
+                }
+            }
+        });
+
         // Save rating to issueEvent
         await this.prisma.issueEvent.update({
-            where: { id: caseRecord.currentIssueId },
+            where: { id: issueIdForRating },
             data: { agentRating: rating }
         });
 

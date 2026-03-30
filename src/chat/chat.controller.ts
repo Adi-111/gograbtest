@@ -113,4 +113,13 @@ export class ChatController {
         }
         return chatInfo;
     }
+
+    @Get(':caseId/lastes-issue-chat')
+    async getChatByLastesIssue(@Param('caseId', ParseIntPipe) caseId: number) {
+        const messages = await this.chatService.ChatByIssues(caseId);
+        if (!messages) {
+            throw new NotFoundException('Messages Not Found');
+        }
+        return messages;
+    }
 }
