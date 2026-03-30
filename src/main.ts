@@ -8,7 +8,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.use(compression());
   app.enableCors({
-    origin: ['https://support-v2.vercel.app', 'https://support-web-041d.onrender.com', 'https://support-test-eight.vercel.app/', 'https://support.go-grab.in'], // Allow requests from Next.js frontend
+    origin: ['https://support-v2.vercel.app', 'https://support-test-eight.vercel.app', 'https://support.go-grab.in'], // Allow requests from Next.js frontend
     credentials: true, // Allow cookies & authentication headers
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allowed HTTP methods
     allowedHeaders: ['Content-Type', 'Authorization'], // Allowed headers
