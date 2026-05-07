@@ -1,5 +1,5 @@
 import { Storage } from '@google-cloud/storage';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import vision, { ImageAnnotatorClient } from "@google-cloud/vision";
 import { PassThrough } from 'stream';
 import { ServiceJson } from './JSON/service-json';
@@ -8,7 +8,7 @@ import { ServiceJson } from './JSON/service-json';
 
 
 @Injectable()
-export class CloudService {
+export class CloudService implements OnModuleDestroy {
     private storage: Storage;
     private bucketName: string;
 
@@ -25,6 +25,9 @@ export class CloudService {
         this.bucketName = process.env.GCP_BUCKET_NAME;
     }
 
+    async onModuleDestroy() {
+        await this.client.close();
+    }
 
     //OCR Functions
     async extractTransactionIdFromGCS(filePath: string) {
@@ -59,11 +62,17 @@ export class CloudService {
 
             if (match) {
                 this.logger.log(`Found 12-digit Transaction ID: ${match[0]}`);
-                return match[0]
-            } else {
-                this.logger.warn('No valid 12-digit Transaction ID found.');
-                return null;
+                return match[0];
             }
+
+            // Fallback: check if this is a Go-Grab payment screenshot
+            if (/go[\s-]?grab/i.test(fullText)) {
+                this.logger.warn('No Transaction ID found, but detected Go-Grab payment. Returning GO_GRAB sentinel.');
+                return 'GO_GRAB';
+            }
+
+            this.logger.warn('No valid 12-digit Transaction ID found.');
+            return null;
 
 
 
@@ -116,6 +125,7 @@ export class CloudService {
                     }))
                     .on('error', (err) => {
                         this.logger.error('Stream upload failed:', err);
+                        stream.destroy();
                         reject(err);
                     })
                     .on('finish', resolve);
@@ -148,7 +158,7 @@ export class CloudService {
                 resumable: false,
                 validation: false,
             });
-            stream.on("error", reject).on("finish", resolve).end(buffer);
+            stream.on("error", (err) => { stream.destroy(); reject(err); }).on("finish", resolve).end(buffer);
         });
 
         await file.makePublic();

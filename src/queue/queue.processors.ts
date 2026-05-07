@@ -19,12 +19,14 @@ import { SystemMessageStatus } from '@prisma/client';
 
 // Timeout wrapper for job processing
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, jobName: string): Promise<T> => {
-    return Promise.race([
-        promise,
-        new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error(`Job ${jobName} timed out after ${timeoutMs}ms`)), timeoutMs)
-        ),
-    ]);
+    let timeoutId: NodeJS.Timeout;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(
+            () => reject(new Error(`Job ${jobName} timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+        );
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 };
 
 // Production timeouts (in ms)

@@ -65,7 +65,7 @@ export class BotService {
                     throw new Error(`Unsupported node type: ${node.flowNodeType}`);
             }
         } catch (error) {
-            this.logger.error(`Failed to process node`, error.stack);
+            this.logger.error(`Failed to process node`, error);
             await this.sendFallbackMessage(phoneNumber, caseId, 'system_error');
         }
     }
@@ -156,7 +156,7 @@ export class BotService {
 
 
         } catch (error) {
-            this.logger.error(`Failed to process node`, error.stack);
+            this.logger.error(`Failed to process node`, error);
             // await this.sendFallbackMessage(phoneNo, caseId);
         }
     }
@@ -390,7 +390,7 @@ export class BotService {
 
 
         } catch (error) {
-            this.logger.error('Failed to send fallback message', error.stack);
+            this.logger.error('Failed to send fallback message', error);
         }
     }
 
@@ -484,9 +484,11 @@ export class BotService {
                 }).padEnd(10) // Pad for alignment
 
                 // decide icon & text
-                const success = vend.vend_status.toLowerCase() === "dispense_successful"
-                const pending = vend.vend_status.toLowerCase() === "pending"
-                if (!success) {
+                const status = vend.vend_status?.toLowerCase()
+                const success = status === "dispense_successful"
+                const pending = status === "pending"
+
+                if (!status || !success) {
                     allVendsSuccessful = false;
                 }
                 if (pending) {
@@ -593,7 +595,7 @@ export class BotService {
         try {
             await this.botSendByNodeId('off-time', phoneNo, caseId);
         } catch (error) {
-            this.logger.error('Failed to send off-time message', error.stack);
+            this.logger.error('Failed to send off-time message', error);
         }
     }
 }

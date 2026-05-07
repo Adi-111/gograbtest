@@ -6,41 +6,26 @@ datasource db {
   provider = "postgresql"
 }
 
-
-
 model ExpiredEvent {
-  id             Int         @id @default(autoincrement())
-  
-  // Relations
-  case           Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  caseId         Int         
-  
-  
-  
-  issueEventId   Int?        
-  
-  // Snapshots
-  customerId     Int         // Denormalized for quick analytics grouping
-  lastAssignedTo CaseHandler
-  totalMessages  Int         @default(0)
-  
-  // Timing details
-  timerSetAt     DateTime    // When the countdown started
-  expiredAt      DateTime    // When the job marked it as expired
-  lastMessageAt  DateTime?   // Time of the very last message in the chat
-  
-  // Traceability
-  lastBotNodeId    String?   // Crucial: The specific step they got stuck on
-  wasAgentNotified Boolean   @default(false)
-
-  createdAt      DateTime    @default(now())
+  id               Int         @id @default(autoincrement())
+  caseId           Int
+  issueEventId     Int?
+  customerId       Int
+  lastAssignedTo   CaseHandler
+  totalMessages    Int         @default(0)
+  timerSetAt       DateTime
+  expiredAt        DateTime
+  lastMessageAt    DateTime?
+  lastBotNodeId    String?
+  wasAgentNotified Boolean     @default(false)
+  createdAt        DateTime    @default(now())
+  case             Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId])
   @@index([issueEventId])
   @@index([createdAt])
-  @@index([lastBotNodeId]) // Recommended: helps find "bottleneck" nodes
+  @@index([lastBotNodeId])
 }
-
 
 model Machine {
   machine_id                            String    @id
@@ -114,6 +99,8 @@ model User {
   updatedAt               DateTime                  @updatedAt
   id                      Int                       @id @default(autoincrement())
   role                    UserRole?                 @default(Unknown)
+  passwordResetOtp        String?
+  passwordResetExpiry     DateTime?
   cases                   Case[]
   dailyUserMessageSummary DailyUserMessageSummary[]
   failedMsgEvent          FailedMsgEvent[]
@@ -122,6 +109,7 @@ model User {
   sessions                Session[]
   statusEvent             StatusEvent[]
   tags                    Tag[]                     @relation("UserTags")
+  sentimentAnalyses       IssueEventSentiment[]
 }
 
 model DailyUserMessageSummary {
@@ -188,9 +176,9 @@ model Case {
   bot            Bot?             @relation(fields: [botId], references: [id])
   customer       WhatsAppCustomer @relation(fields: [customerId], references: [id])
   user           User?            @relation(fields: [userId], references: [id])
+  expiredEvents  ExpiredEvent[]
   failedMsgEvent FailedMsgEvent[]
   issueEvents    IssueEvent[]
-  expiredEvents  ExpiredEvent[]
   messages       Message[]
   notes          Note[]
   statusEvent    StatusEvent[]
@@ -227,11 +215,33 @@ model IssueEvent {
   agentRating       Int?
   case              Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
   messages          Message[]
+  sentimentAnalysis IssueEventSentiment?
+
 
   @@index([caseId])
   @@index([status, isActive])
   @@index([issueType])
   @@index([userId, status, closedAt])
+}
+model IssueEventSentiment {
+  id                   Int       @id @default(autoincrement())
+  issueEventId         Int       @unique
+  userId               Int
+  customerPhoneNumbers String[]
+  totalMessages        Int
+  firstMessageAt       DateTime
+  lastMessageAt        DateTime
+  overallSentiment     Sentiment
+  summary              String
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  issueEvent           IssueEvent @relation(fields: [issueEventId], references: [id])
+  user                 User       @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([overallSentiment])
+  @@index([firstMessageAt])
 }
 
 model StatusEvent {
@@ -550,4 +560,12 @@ enum Status {
 enum CaseHandler {
   USER
   BOT
+}
+
+enum Sentiment {
+  very_positive
+  positive
+  neutral
+  negative
+  very_negative
 }

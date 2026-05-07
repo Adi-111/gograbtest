@@ -127,7 +127,14 @@ export class MetricController {
     return await this.metricService.NotSendUnratedMessageIssues(fromIST, toIST);
   }
 
-
-
+  @Get("sentiment")
+  async getSentimentAnalytics(
+    @Query("preset") preset?: "today" | "1d" | "7d" | "30d",
+    @Query("from") fromStr?: string,
+    @Query("to") toStr?: string,
+  ) {
+    const { fromIST, toIST } = resolveRange(preset, fromStr, toStr);
+    return await this.metricService.getSentimentAnalytics({ fromIST, toIST });
+  }
 
 }

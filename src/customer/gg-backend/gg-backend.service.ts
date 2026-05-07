@@ -62,7 +62,7 @@ export class GGBackendService {
             }
             return isExpired;
         } catch (error) {
-            this.logger.error(`Error decoding token: ${error.message}. Assuming expired/invalid.`);
+            this.logger.error(`Error decoding token: ${error}. Assuming expired/invalid.`);
             return true;
         }
     }
@@ -282,16 +282,14 @@ export class GGBackendService {
         const product_ids: string[] = await Promise.all(
             productItems.map(el => el.product_id)
         )
-        const dispenseStatuses = await Promise.all(
-            vendItems.map(el => el.vend_status)
-        )
+        const dispenseStatuses = vendItems.map(el => el.vend_status ?? 'UNKNOWN')
         const machine_id = vendInfo.machine_id
         this.logger.log(coils, product_ids);
         const customerData = await this.prisma.customerOrderDetails.create({
             data: {
                 customerId,
                 productIds: product_ids,
-                dispenseStatuses,
+                dispenseStatuses: dispenseStatuses,
                 orderTime: vendItems[vendItems.length - 1].vend_time,
                 coils,
                 machine_id

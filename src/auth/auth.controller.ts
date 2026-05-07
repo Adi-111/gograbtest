@@ -12,6 +12,8 @@ import { LocalAuthGuard } from './guards/local-auth.guard';
 
 import { SignupDto } from './dto/sign-up.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ApiTags, ApiOperation, ApiBody, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Public } from './decorators/public.decorator';
@@ -46,6 +48,24 @@ export class AuthController {
     return await this.authService.signIn({ email: loginDto.email, password: loginDto.password });
   }
 
+
+  @Public()
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Request a password reset link' })
+  @ApiBody({ type: ForgotPasswordDto })
+  @ApiResponse({ status: 200, description: 'Reset link sent if email exists' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password using a valid token' })
+  @ApiBody({ type: ResetPasswordDto })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
+  }
 
   @UseGuards(AuthGuard('jwt'))
   @Post('logout')

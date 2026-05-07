@@ -2,6 +2,7 @@ import {
   forwardRef,
   Inject,
   Logger,
+  OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
 import {
@@ -45,13 +46,14 @@ import { JsonObject, JsonValue } from '@prisma/client/runtime/client';
     pingInterval: 10000,
     pingTimeout: 5000,
   },
-  transports: ['websocket', 'polling'],
+  transports: ['websocket'],
 })
 export class ChatGateway
-  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(ChatGateway.name);
   private activeRooms = new Map<number, Set<string>>();
+  private cleanupInterval: NodeJS.Timeout;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -64,6 +66,20 @@ export class ChatGateway
 
   onModuleInit(): void {
     this.logger.log('WebSocket Gateway initialized');
+    this.cleanupInterval = setInterval(() => {
+      const connectedIds = new Set(this.server.sockets.sockets.keys());
+      for (const [caseId, socketIds] of this.activeRooms) {
+        for (const id of socketIds) {
+          if (!connectedIds.has(id)) socketIds.delete(id);
+        }
+        if (socketIds.size === 0) this.activeRooms.delete(caseId);
+      }
+    }, 60_000);
+  }
+
+  onModuleDestroy(): void {
+    clearInterval(this.cleanupInterval);
+    this.activeRooms.clear();
   }
 
   // Returns a standardized room name for a case.
@@ -1110,54 +1126,18 @@ export class ChatGateway
         }
       }
 
-      if (status === 'PROCESSING' || status === 'INITIATED') {
-        if (caseRecord.currentIssueId == null) {
-          const issue = await this.prisma.issueEvent.create({
-            data: {
-              caseId,
-              customerId: caseRecord.customerId,
-              userId: userId,
-              agentCalledAt: new Date(),
-            },
-          });
-          this.logger.debug(
-            `Created new issue (user path) ${logCtx({ caseId, issueId: issue.id })}`,
-          );
-
-          await this.prisma.case.update({
-            where: { id: caseId },
-            data: { currentIssueId: issue.id },
-          });
-          this.logger.debug(
-            `Linked case.currentIssueId (user path) ${logCtx({
-              caseId,
-              issueId: issue.id,
-            })}`,
-          );
-        } else {
-          await this.prisma.issueEvent.update({
-            where: { id: caseRecord.currentIssueId },
-            data: {
-              userId: userId,
-              agentLinkedAt: new Date(),
-              isActive: true,
-            },
-          });
-          this.logger.debug(
-            `Updated existing issue (user path) ${logCtx({
-              issueId: caseRecord.currentIssueId,
-            })}`,
-          );
-        }
+      // Assign case to the agent for all status changes (not just PROCESSING/INITIATED)
+      if (userId) {
+        await this.assignCaseToUser(caseId, userId, caseRecord.customerId, caseRecord.currentIssueId);
+        this.logger.debug(`assignCaseToUser completed (user path) ${logCtx({ caseId, userId })}`);
       }
 
 
 
 
 
-
-
-
+      // When userId is present, always mark as USER; otherwise fall back to payload assignedTo
+      const resolvedAssignedTo = userId ? ('USER' as CaseHandler) : assignedTo;
       let updatedCase: UpdatedCaseDto
       if (status === 'SOLVED') {
         updatedCase = await this.prisma.case.update({
@@ -1165,8 +1145,7 @@ export class ChatGateway
           data: {
             status,
             lastBotNodeId: null,
-            ...(assignedTo && { assignedTo }),
-            // Safely connect userId when provided
+            ...(resolvedAssignedTo && { assignedTo: resolvedAssignedTo }),
             ...(userId && { user: { connect: { id: userId } } })
           },
           select: {
@@ -1187,8 +1166,7 @@ export class ChatGateway
           where: { id: caseId },
           data: {
             status,
-            ...(assignedTo && { assignedTo }),
-            // Safely connect userId when provided
+            ...(resolvedAssignedTo && { assignedTo: resolvedAssignedTo }),
             ...(userId && { user: { connect: { id: userId } } })
           },
           select: {
@@ -1668,7 +1646,15 @@ export class ChatGateway
     try {
       const { quickMessageId, caseId, userId } = payload;
       this.trackConnection(client, caseId);
+      const caseRecord = await this.prisma.case.findUnique({
+        where: { id: caseId },
+        select: { customerId: true, currentIssueId: true },
+      });
+      if (!caseRecord) throw new Error('Case not found');
       await this.chatService.sendQuickMessage(quickMessageId, caseId, userId);
+      if (userId) {
+        await this.assignCaseToUser(caseId, userId, caseRecord.customerId, caseRecord.currentIssueId);
+      }
     } catch (error) {
       this.logger.log(`error while handling quick message:${error}`)
     }
@@ -1683,16 +1669,12 @@ export class ChatGateway
 
       await this.chatService.sendTemplateMessage(templateName, caseId, userId, text);
 
-
       const result = await this.prisma.case.findUnique({
         where: { id: caseId },
-        select: { meta: true }
+        select: { meta: true, customerId: true, currentIssueId: true },
       });
 
-
       const metaValue = result?.meta;
-
-
       const currMeta = typeof metaValue === 'string'
         ? JSON.parse(metaValue)
         : (metaValue || {});
@@ -1701,12 +1683,17 @@ export class ChatGateway
         where: { id: caseId },
         data: {
           meta: {
-            ...(currMeta as object), // Keep existing
+            ...(currMeta as object),
             templateSent: true,
             templateSentAt: new Date()
           }
         }
       });
+
+      if (userId) {
+        await this.assignCaseToUser(caseId, userId, result.customerId, result.currentIssueId);
+      }
+
       client.emit('send-t-success', { caseId, userId });
     } catch (error) {
       this.logger.log(`error while handling quick message:${error}`)
@@ -1715,7 +1702,9 @@ export class ChatGateway
 
   handleWhatsappMessage(message: ChatEntity): void {
     const room = this.getRoomName(message.caseId);
-    this.handleUnreadCount(message.caseId)
+    this.handleUnreadCount(message.caseId).catch((err) =>
+      this.logger.error(`handleUnreadCount failed for case ${message.caseId}`, err),
+    );
     this.server.to(room).emit('whatsapp-message', message);
     this.server.to(UiEntity.ChatList).emit('whatsapp-chat', message);
   }
@@ -1841,6 +1830,50 @@ export class ChatGateway
   async handleFailedMessage(failedMessageDto: FailedMessageDto, client: Socket): Promise<void> {
     this.logger.log(failedMessageDto);
     client.emit('failed-msg', failedMessageDto);
+  }
+
+  /**
+   * Assigns a case to a user agent and updates the current issue event.
+   * Creates a new issue event if none exists.
+   * Call this whenever an agent sends any message or changes status on a case.
+   */
+  private async assignCaseToUser(
+    caseId: number,
+    userId: number,
+    customerId: number,
+    currentIssueId: number | null,
+  ): Promise<void> {
+    await this.prisma.case.update({
+      where: { id: caseId },
+      data: {
+        assignedTo: 'USER',
+        user: { connect: { id: userId } },
+      },
+    });
+
+    let currIssueId = currentIssueId;
+    if (!currIssueId) {
+      const issueNew = await this.prisma.issueEvent.create({
+        data: { caseId, customerId, agentCalledAt: new Date() },
+      });
+      await this.prisma.case.update({
+        where: { id: caseId },
+        data: { currentIssueId: issueNew.id },
+      });
+      currIssueId = issueNew.id;
+    }
+
+    const currentIssue = await this.prisma.issueEvent.findUnique({
+      where: { id: currIssueId },
+      select: { agentLinkedAt: true },
+    });
+    await this.prisma.issueEvent.update({
+      where: { id: currIssueId },
+      data: {
+        ...(currentIssue.agentLinkedAt === null && { agentLinkedAt: new Date() }),
+        userId,
+      },
+    });
   }
 
 

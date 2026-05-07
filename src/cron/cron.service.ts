@@ -31,13 +31,13 @@ export class CronService {
             this.logger.error('❌ handleProductCron failed', error);
             newrelic.recordCustomEvent('CronJobFailure', {
                 cronJob: 'handleProductCron',
-                error: error?.message ?? String(error),
+                error: error ?? String(error),
                 executionTime: new Date().toISOString(),
             });
         }
     }
 
-    @Cron(CronExpression.EVERY_HOUR)
+    @Cron(CronExpression.EVERY_3_HOURS)
     async handleMachineCron() {
         try {
             await this.cusService.syncMachine();
@@ -45,17 +45,23 @@ export class CronService {
             this.logger.error('❌ handleMachineCron failed', error);
             newrelic.recordCustomEvent('CronJobFailure', {
                 cronJob: 'handleMachineCron',
-                error: error?.message ?? String(error),
+                error: error ?? String(error),
                 executionTime: new Date().toISOString(),
             });
         }
     }
 
     // @Cron(CronExpression.EVERY_10_SECONDS)
-    @Cron(CronExpression.EVERY_5_MINUTES)
+    @Cron(CronExpression.EVERY_10_MINUTES)
     async traceUnreadCases() {
         try {
             this.logger.log('🔍 Starting scheduled unread cases tracing...');
+
+
+
+
+
+
 
             // Call getChatList with UNREAD filter
             // The traceUnreadCases method inside getChatList will automatically send data to New Relic
@@ -85,7 +91,7 @@ export class CronService {
             newrelic.recordCustomEvent('UnreadCasesCronExecution', {
                 executionTime: new Date().toISOString(),
                 status: 'failed',
-                error: error.message,
+                error: error,
             });
         }
     }
@@ -160,7 +166,7 @@ export class CronService {
             this.logger.error('❌ handleDailyUserSummaries failed', error);
             newrelic.recordCustomEvent('CronJobFailure', {
                 cronJob: 'handleDailyUserSummaries',
-                error: error?.message ?? String(error),
+                error: error ?? String(error),
                 executionTime: new Date().toISOString(),
             });
         }
@@ -373,7 +379,7 @@ export class CronService {
             newrelic.recordCustomEvent('DailyFallbackMessageSummary', {
                 executionTime: new Date().toISOString(),
                 status: 'failed',
-                error: error.message,
+                error: error,
             });
         }
     }

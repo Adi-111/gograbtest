@@ -51,29 +51,48 @@ export class QueueService implements OnModuleDestroy {
         lastCheck: new Date(),
     };
 
+    private readonly monitorStatesHandler: (states: any) => void;
+    private readonly errorHandler: (error: Error) => void;
+
     constructor(@Inject(PG_BOSS) private readonly boss: PgBoss) {
-        // Subscribe to monitor events for health status
-        (this.boss as any).on('monitor-states', (states: any) => {
+        const isProduction = process.env.NODE_ENV === 'production';
+
+        this.monitorStatesHandler = (states: any) => {
             this.healthStatus = {
                 healthy: true,
-                queues: states.queues || {},
+                queues: { ...states.queues },
                 lastCheck: new Date(),
             };
-        });
+            if (isProduction) {
+                Object.entries(states.queues || {}).forEach(([queueName, stats]: [string, any]) => {
+                    newrelic.recordMetric(`Custom/Queue/${queueName}/created`, stats.created || 0);
+                    newrelic.recordMetric(`Custom/Queue/${queueName}/active`, stats.active || 0);
+                    newrelic.recordMetric(`Custom/Queue/${queueName}/completed`, stats.completed || 0);
+                    newrelic.recordMetric(`Custom/Queue/${queueName}/failed`, stats.failed || 0);
+                });
+            }
+        };
 
-        (this.boss as any).on('error', () => {
+        this.errorHandler = (error: Error) => {
             this.healthStatus.healthy = false;
-        });
+            this.logger.error('PgBoss error:', error);
+            newrelic.noticeError(error, { component: 'PgBoss', type: 'QueueError' });
+            newrelic.incrementMetric('Custom/Queue/Errors', 1);
+        };
+
+        (this.boss as any).on('monitor-states', this.monitorStatesHandler);
+        (this.boss as any).on('error', this.errorHandler);
     }
 
     async onModuleDestroy() {
         this.logger.log('Stopping PgBoss gracefully...');
         try {
+            (this.boss as any).removeListener('monitor-states', this.monitorStatesHandler);
+            (this.boss as any).removeListener('error', this.errorHandler);
             await this.boss.stop({ graceful: true, timeout: 30000 });
             this.logger.log('PgBoss stopped successfully');
         } catch (error) {
             this.logger.error('Error stopping PgBoss:', error);
-            // Force stop if graceful fails
             await this.boss.stop({ graceful: false });
         }
     }

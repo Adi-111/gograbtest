@@ -959,6 +959,80 @@ export class MetricService {
     };
   }
 
+  async getSentimentAnalytics(params: { fromIST: Date; toIST: Date }) {
+    const { fromIST, toIST } = params;
+
+    const records = await this.prisma.issueEventSentiment.findMany({
+      where: { firstMessageAt: { gte: fromIST, lte: toIST } },
+      select: {
+        issueEventId: true,
+        userId: true,
+        customerPhoneNumbers: true,
+        overallSentiment: true,
+        totalMessages: true,
+        firstMessageAt: true,
+        lastMessageAt: true,
+        summary: true,
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { firstMessageAt: 'desc' },
+    });
+
+    // date → agentId → { meta, entries[] }
+    const byDate = new Map<string, Map<number, {
+      agentId: number;
+      agentName: string;
+      entries: {
+        issueEventId: number;
+        agentName: string;
+        customerPhoneNumbers: string[];
+        overallSentiment: string;
+        firstMessageAt: Date;
+        durationMs: number;
+        totalMessages: number;
+        summary: string;
+      }[];
+    }>>();
+
+    for (const r of records) {
+      const dateKey = format(r.firstMessageAt, 'yyyy-MM-dd');
+      const durationMs = r.lastMessageAt.getTime() - r.firstMessageAt.getTime();
+
+      if (!byDate.has(dateKey)) byDate.set(dateKey, new Map());
+      const agentMap = byDate.get(dateKey)!;
+
+      if (!agentMap.has(r.userId)) {
+        agentMap.set(r.userId, {
+          agentId: r.userId,
+          agentName: `${r.user.firstName} ${r.user.lastName}`.trim(),
+          entries: [],
+        });
+      }
+
+      agentMap.get(r.userId)!.entries.push({
+        issueEventId: r.issueEventId,
+        agentName: r.user.firstName,
+        customerPhoneNumbers: r.customerPhoneNumbers,
+        overallSentiment: r.overallSentiment as string,
+        firstMessageAt: r.firstMessageAt,
+        durationMs,
+        totalMessages: r.totalMessages,
+        summary: r.summary,
+      });
+    }
+
+    // Serialize to plain object: { date: { agentId: { ... } } }
+    const result: Record<string, Record<number, typeof byDate extends Map<any, Map<any, infer V>> ? V : never>> = {};
+    for (const [date, agentMap] of byDate) {
+      result[date] = {};
+      for (const [agentId, agentData] of agentMap) {
+        result[date][agentId] = agentData;
+      }
+    }
+
+    return result;
+  }
+
   async getExpiredChatAnalytics(from: Date, to: Date) {
     // 1. Fetch expired events in range
     const expiredEvents = await this.prisma.expiredEvent.findMany({

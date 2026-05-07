@@ -13,8 +13,6 @@ export const PgBossProvider: Provider = {
     const logger = new Logger('PgBoss');
     const isProduction = process.env.NODE_ENV === 'production';
 
-    // Use type assertion to bypass strict type checking for pg-boss options
-    // pg-boss runtime accepts these options even if TypeScript types don't include them
     const boss = new PgBoss({
       connectionString: process.env.DATABASE_URL,
       schema: 'pgboss',
@@ -30,35 +28,6 @@ export const PgBossProvider: Provider = {
       // Maintenance
       maintenanceIntervalSeconds: 120,
     } as any);
-
-    // Error handling with New Relic integration
-    boss.on('error', (error: Error) => {
-      logger.error('PgBoss error:', error);
-      newrelic.noticeError(error, {
-        component: 'PgBoss',
-        type: 'QueueError',
-      });
-      newrelic.incrementMetric('Custom/Queue/Errors', 1);
-    });
-
-    // Monitor queue states for observability
-    (boss as any).on('monitor-states', (states: any) => {
-      if (isProduction) {
-        // Record queue metrics to New Relic
-        Object.entries(states.queues || {}).forEach(([queueName, stats]: [string, any]) => {
-          newrelic.recordMetric(`Custom/Queue/${queueName}/created`, stats.created || 0);
-          newrelic.recordMetric(`Custom/Queue/${queueName}/active`, stats.active || 0);
-          newrelic.recordMetric(`Custom/Queue/${queueName}/completed`, stats.completed || 0);
-          newrelic.recordMetric(`Custom/Queue/${queueName}/failed`, stats.failed || 0);
-        });
-      }
-      logger.debug(`Queue states: ${JSON.stringify(states)}`);
-    });
-
-    // Handle wip (work-in-progress) events
-    (boss as any).on('wip', (data: any) => {
-      logger.debug(`WIP jobs: ${JSON.stringify(data)}`);
-    });
 
     await boss.start();
     logger.log('✅ PgBoss started successfully');

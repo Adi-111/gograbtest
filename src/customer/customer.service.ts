@@ -105,7 +105,7 @@ export class CustomerService {
                 include: { message: true, cases: true },
             });
         } catch (error) {
-            this.logger.error('Failed to fetch customers', error.stack);
+            this.logger.error('Failed to fetch customers',);
             throw new Error('Failed to retrieve customers');
         }
     }
@@ -116,7 +116,7 @@ export class CustomerService {
                 where: { id },
             });
         } catch (error) {
-            this.logger.error(`Failed to find customer ${id}`, error.stack);
+            this.logger.error(`Failed to find customer ${id}`, error);
             throw new Error('Customer not found');
         }
     }
@@ -127,7 +127,7 @@ export class CustomerService {
                 where: { id },
             });
         } catch (error) {
-            this.logger.error(`Failed to delete customer ${id}`, error.stack);
+            this.logger.error(`Failed to delete customer ${id}`, error);
             throw new Error('Failed to delete customer');
         }
     }
@@ -207,7 +207,7 @@ export class CustomerService {
             newrelic.incrementMetric("Custom/RefundRetry/Failures", 1);
 
             // Log server-side
-            this.logger.error(`Error in handleRefundRetry for case ${caseId}: ${error.message}`);
+            this.logger.error(`Error in handleRefundRetry for case ${caseId}: ${error}`);
             throw error;
         }
     }
@@ -770,7 +770,7 @@ export class CustomerService {
 
             return { customer, case: caseRecord };
         } catch (error) {
-            this.logger.error('Message processing failed', error.stack);
+            this.logger.error('Message processing failed', error);
             throw error;
         }
     }
@@ -787,6 +787,16 @@ export class CustomerService {
 
             const res = await this.cloudService.refundStatus(url);
             const utrId = res;
+
+            if (utrId === 'GO_GRAB') {
+                this.logger.warn('Go-Grab payment detected. Sending screenshot2.');
+                await this.botService.botSendByNodeId('screenshot2', phoneNo, caseId);
+                await this.prisma.case.update({
+                    where: { id: caseId },
+                    data: { meta: { refundScreenshotActive: false, refundScreenshotTries: 0 } },
+                });
+                return;
+            }
 
             if (!utrId) {
                 this.logger.warn('No UTR ID extracted from screenshot. Retrying refund screenshot...');
@@ -975,7 +985,7 @@ export class CustomerService {
             },
             include: { customer: true, }
         });
-        if (activeCase && activeCase.currentIssueId === null) {
+        if (activeCase && activeCase.currentIssueId === null && !skipReopen) {
             await this.prisma.$transaction(async (tx) => {
                 // Re-check inside transaction to prevent race condition
                 const freshCase = await tx.case.findUnique({
@@ -1264,7 +1274,7 @@ export class CustomerService {
             return mediaData;
 
         } catch (error) {
-            this.logger.error('Failed to process media', error.stack);
+            this.logger.error('Failed to process media', error);
             return { error: { message: 'Media processing failed' } };
         }
     }
@@ -1404,7 +1414,7 @@ export class CustomerService {
             const response = await this.sendWhatsAppRequest(payload);
             this.logger.log(`Image payload response: ${response}`);
         } catch (error) {
-            this.logger.error(`Failed to send image to ${to}: ${error.message}`, error.stack);
+            this.logger.error(`Failed to send image to ${to}: ${error}`, error);
             throw new Error('Failed to send image message');
         }
     }
@@ -1427,7 +1437,7 @@ export class CustomerService {
             this.logger.log(`Response received from ${url}`);
             return Buffer.from(response.data, 'binary');
         } catch (error) {
-            this.logger.error(`Error downloading media from ${url}`, error.stack);
+            this.logger.error(`Error downloading media from ${url}`, error);
             throw new Error('Error downloading media');
         }
     }

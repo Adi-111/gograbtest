@@ -1,4 +1,5 @@
 import {
+    BadRequestException,
     ConflictException,
     Injectable,
     Logger,
@@ -11,6 +12,9 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthEntity } from './entity/auth.entity';
 import { SignupDto } from './dto/sign-up.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { MailService } from 'src/mail/mail.service';
 
 @Injectable()
 export class AuthService {
@@ -19,6 +23,7 @@ export class AuthService {
     constructor(
         private prisma: PrismaService,
         private jwtService: JwtService,
+        private mailService: MailService,
     ) { }
 
     /**
@@ -180,6 +185,64 @@ export class AuthService {
      * @param accessToken - The access token.
      * @returns True if the session is valid, false otherwise.
      */
+    private generateOtp(): string {
+        return Math.floor(100000 + Math.random() * 900000).toString();
+    }
+
+    async forgotPassword({ email }: ForgotPasswordDto): Promise<{ message: string }> {
+        const user = await this.prisma.user.findUnique({ where: { email } });
+
+        // Always return generic message to prevent user enumeration
+        if (!user) {
+            return { message: 'If that email is registered, an OTP has been sent.' };
+        }
+
+        const otp = this.generateOtp();
+        const hashedOtp = await bcrypt.hash(otp, 10);
+        const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        await this.prisma.user.update({
+            where: { email },
+            data: { passwordResetOtp: hashedOtp, passwordResetExpiry: expiry },
+        });
+
+        await this.mailService.sendPasswordResetOtp(email, otp);
+
+        this.logger.log(`Password reset OTP issued for: ${email}`);
+        return { message: 'If that email is registered, an OTP has been sent.' };
+    }
+
+    async resetPassword({ email, otp, newPassword }: ResetPasswordDto): Promise<{ message: string }> {
+        const user = await this.prisma.user.findUnique({ where: { email } });
+
+        if (!user || !user.passwordResetOtp || !user.passwordResetExpiry) {
+            throw new BadRequestException('Invalid or expired OTP.');
+        }
+
+        if (user.passwordResetExpiry < new Date()) {
+            throw new BadRequestException('OTP has expired. Please request a new one.');
+        }
+
+        const isOtpValid = await bcrypt.compare(otp, user.passwordResetOtp);
+        if (!isOtpValid) {
+            throw new BadRequestException('Invalid OTP.');
+        }
+
+        const hashed = await this.hashPassword(newPassword);
+
+        await this.prisma.user.update({
+            where: { id: user.id },
+            data: {
+                password: hashed,
+                passwordResetOtp: null,
+                passwordResetExpiry: null,
+            },
+        });
+
+        this.logger.log(`Password reset successful for: ${user.email}`);
+        return { message: 'Password reset successful. You can now log in.' };
+    }
+
     async validateSession(token: string): Promise<boolean> {
         this.logger.log(token)
         const session = await this.prisma.session.findFirst({

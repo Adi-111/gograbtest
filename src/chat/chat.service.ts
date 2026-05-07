@@ -159,7 +159,7 @@ export class ChatService {
             newrelic.incrementMetric("Custom/ChatJoinCase/Failures", 1);
 
             // Log server-side
-            this.logger.error(`Error joining case ${caseId}: ${error.message}`);
+            this.logger.error(`Error joining case ${caseId}: ${error}`);
             throw error;
         }
     }
@@ -267,7 +267,7 @@ export class ChatService {
             newrelic.incrementMetric("Custom/ChatJoinCase/Failures", 1);
 
             // Log server-side
-            this.logger.error(`Error joining case ${caseId}: ${error.message}`);
+            this.logger.error(`Error joining case ${caseId}: ${error}`);
             throw error;
         }
     }
@@ -380,7 +380,7 @@ export class ChatService {
             newrelic.incrementMetric("Custom/ChatGetCaseEvents/Failures", 1);
 
             // Log server-side
-            this.logger.error(`Error getting case events for case ${caseId}: ${error.message}`);
+            this.logger.error(`Error getting case events for case ${caseId}: ${error}`);
             throw error;
         }
     }
@@ -682,7 +682,7 @@ export class ChatService {
                 },
             });
         } catch (error) {
-            this.logger.error('Failed to fetch messages', error.stack);
+            this.logger.error('Failed to fetch messages', error);
             throw error;
         }
     }
@@ -978,7 +978,7 @@ export class ChatService {
                 orderBy: { timestamp: 'asc' }
             });
         } catch (error) {
-            this.logger.error(`Failed to get messages for case ${caseId}`, error.stack);
+            this.logger.error(`Failed to get messages for case ${caseId}`, error);
             throw error;
         }
     }
@@ -998,7 +998,7 @@ export class ChatService {
             this.chatGateway.handleMessageStatusUpdate(updated);
             return updated;
         } catch (error) {
-            this.logger.error(`Failed to update status for message ${messageId}`, error.stack);
+            this.logger.error(`Failed to update status for message ${messageId}`, error);
             throw error;
         }
     }
@@ -1099,7 +1099,7 @@ export class ChatService {
                 data: fileData
             });
         } catch (error) {
-            this.logger.error('Failed to create media attachment', error.stack);
+            this.logger.error('Failed to create media attachment', error);
             throw error;
         }
     }
@@ -1117,7 +1117,7 @@ export class ChatService {
                 data: locationData
             });
         } catch (error) {
-            this.logger.error('Failed to create location attachment', error.stack);
+            this.logger.error('Failed to create location attachment', error);
             throw error;
         }
     }
